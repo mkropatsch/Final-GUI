@@ -36,11 +36,11 @@ from PyQt5.QtWidgets import (
 )
 import pyqtgraph as pg
 
-from sensors_tab import SensorsTab
+from tabs.sensors_tab import SensorsTab
 
-from automation_tab import AutomationTab
+from tabs.automation_tab import AutomationTab
 
-from microscope_tab import MicroscopeTab
+from tabs.microscope_tab import MicroscopeTab
 
 try:
     import serial.tools.list_ports as list_ports
