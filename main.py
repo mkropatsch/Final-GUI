@@ -56,7 +56,7 @@ pg.setConfigOption("foreground", "#dddddd") #soft white
 # --------------------------- child (gantry) entry ----------------------------
 def gantry_process_main(q_to_gui, q_from_gui, q_from_controller,
                         simulate: bool, port: str | None = None) -> None:
-    from gantry_gui_new_automate_2_2 import GantrySystem
+    from backend.gantry import GantrySystem
 
     g = GantrySystem(
         q_to_gui=q_to_gui,
@@ -71,7 +71,7 @@ def gantry_process_main(q_to_gui, q_from_gui, q_from_controller,
 
 def controller_process_main(q_from_gui_to_ctrl, q_to_gantry,
                             joystick_index: int = 0) -> None:
-    from controller_2_0 import XboxController
+    from backend.controller import XboxController
     
     ctrl = XboxController(
         q_from_gui_to_ctrl=q_from_gui_to_ctrl,
