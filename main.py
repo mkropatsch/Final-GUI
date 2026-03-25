@@ -85,7 +85,7 @@ def controller_process_main(q_from_gui_to_ctrl, q_to_gantry,
 class StageGUI2(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Gantry Control, Sensors, Automation 2.6")
+        self.setWindowTitle("Auto in-vitro v3 TEST")
         self.resize(1450, 900)
 
         # multiprocessing context
