@@ -1,7 +1,8 @@
-# gui_gantry_2_6.py
+# main.py
 
-### gui_gantry_2.6
+### main
 # ------ Adding microscope tab
+# renamed to main because it's easier
 
 
 from __future__ import annotations
