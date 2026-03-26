@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import math
-import queue
-import random
+import queue # communication between worker thread and GUI
+import random # for simulation mode
 import re
-import threading
+import threading # sensor reading happens in the background so GUI doesn't lock up
 import time
-from collections import deque
+from collections import deque #used for live plotting (keeps a number of "recent items")
 
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer # all just GUI building pieces
 from PyQt5.QtWidgets import (
     QComboBox,
     QFrame,
@@ -23,14 +23,14 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-HAS_SERIAL = True
+HAS_SERIAL = True # if pyserial isn't downloaded, simulation should still work
 try:
     import serial
     import serial.tools.list_ports
 except Exception:
     HAS_SERIAL = False
 
-HAS_MPL = True
+HAS_MPL = True # matplotlib should be downloaded, if not it just won't show plots
 try:
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
@@ -38,42 +38,42 @@ except Exception:
     HAS_MPL = False
 
 
-PATTERN = re.compile(
+PATTERN = re.compile( # goal is to pull the readings, looks for specific text
     r"CO2:\s*(\d+)\s*ppm\s*\|\s*Temp:\s*([-\d\.]+)\s*°C\s*\|\s*RH:\s*([-\d\.]+)\s*%\s*\|\s*\[(?:O₂|O2|O)\]\s*([-\d\.]+)",
-    re.IGNORECASE,
+    re.IGNORECASE, #case difference won't matter (temp vs Temp)
 )
 
 
-class SerialReader(threading.Thread):
+class SerialReader(threading.Thread): # runs independently from the GUI and reads sensor data continuously
     def __init__(self, port: str, baud: int = 115200, out_queue: queue.Queue | None = None):
-        super().__init__(daemon=True)
-        self.port = port
+        super().__init__(daemon=True) #initializes the thread
+        self.port = port # port and baud stores connection info
         self.baud = baud
-        self.q = out_queue or queue.Queue()
-        self._stop_event = threading.Event()
-        self.ser = None
+        self.q = out_queue or queue.Queue() #if queue is passed in -> use it, otherwise create a new one (the GUI passes in a shared queue, so both thread and GUI use the same one)
+        self._stop_event = threading.Event() #used to stop the loop
+        self.ser = None #placeholder for serial connection
 
-    def stop(self) -> None:
+    def stop(self) -> None: #sets the flag so the loop can stop without killing threads
         self._stop_event.set()
 
     def run(self) -> None:
         try:
             self.ser = serial.Serial(self.port, self.baud, timeout=1)
-            time.sleep(1.2)
-            self.ser.reset_input_buffer()
+            time.sleep(1.2) #many arduino boards reset when serial opens, so it gives it some time to reboot
+            self.ser.reset_input_buffer() #clears any junk data that may have been sent during startup
         except Exception as e:
             self.q.put(("status", f"Could not open {self.port}: {e}"))
-            return
+            return #sends this message instead of crashing basically
 
         self.q.put(("status", f"Connected to {self.port}"))
 
-        while not self._stop_event.is_set():
+        while not self._stop_event.is_set(): #basically this loop runs forever until it's stopped
             try:
-                raw = self.ser.readline()
+                raw = self.ser.readline() #waits for a full line
                 if not raw:
                     continue
-                line = raw.decode(errors="replace").strip()
-                match = PATTERN.search(line)
+                line = raw.decode(errors="replace").strip() #converts to a string
+                match = PATTERN.search(line) #if it matches the pattern, it sends the data
                 if match:
                     self.q.put((
                         "data",
@@ -91,11 +91,11 @@ class SerialReader(threading.Thread):
                 break
 
         try:
-            if self.ser and self.ser.is_open:
+            if self.ser and self.ser.is_open: #closes the port safely
                 self.ser.close()
         except Exception:
             pass
-        self.q.put(("status", "Disconnected"))
+        self.q.put(("status", "Disconnected")) #tells the gui it's done
 
 
 class SimReader(threading.Thread):
