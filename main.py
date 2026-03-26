@@ -1,8 +1,8 @@
 # main.py
 
-### main
-# ------ Adding microscope tab
-# renamed to main because it's easier
+# Changing layout
+    # Graph/camera sizing
+    # Moved camera connection settings to the left
 
 
 from __future__ import annotations
@@ -85,7 +85,7 @@ def controller_process_main(q_from_gui_to_ctrl, q_to_gantry,
 class StageGUI2(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Auto in-vitro v3 TEST")
+        self.setWindowTitle("Auto in-vitro v3")
         self.resize(1450, 900)
 
         # multiprocessing context
@@ -191,25 +191,25 @@ class StageGUI2(QMainWindow):
         left_layout.setSpacing(5)
         left_layout.setContentsMargins(10, 10, 10, 10)
         left_layout.setAlignment(Qt.AlignTop)
+        
 
         self.xy_plot = pg.PlotWidget()
 
         #dark styling
         self.xy_plot.setBackground("#1e1e1e")
-        self.xy_plot.setAspectLocked(False)
+        self.xy_plot.setAspectLocked(True)
         self.xy_plot.showGrid(x=True, y=True, alpha=0.25)
         self.xy_plot.setLabel("left", "Y (mm)", color="#cccccc")
         self.xy_plot.setLabel("bottom", "X (mm)", color="#cccccc")
         self.xy_plot.invertY(True)
-        #self.xy_plot.setFixedHeight(450)
-        self.xy_plot.setMinimumHeight(320)
-        self.xy_plot.setMaximumHeight(400)
+        self.xy_plot.setMinimumHeight(480)
+        self.xy_plot.setMaximumHeight(550)
         self.xy_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         # Fixed plot:
         self.xy_plot.setXRange(-10, 110, padding=0)
         self.xy_plot.setYRange(-10, 110, padding=0)
-        self.xy_plot.setLimits(xMin=-1000, xMax=1000, yMin=-1000, yMax=1000)
+        self.xy_plot.setLimits(xMin=-10, xMax=1000, yMin=-10, yMax=1000)
 
 
         self._xy_point = self.xy_plot.plot(
@@ -257,12 +257,48 @@ class StageGUI2(QMainWindow):
         camera_layout = QVBoxLayout(self.camera_group)
         camera_layout.setSpacing(8)
         camera_layout.setContentsMargins(10, 10, 10, 10)
+        
+        camera_main_row = QHBoxLayout()
+        camera_main_row.setSpacing(14)
+        
+        # left side: camera controls
+        camera_controls_col = QVBoxLayout()
+        camera_controls_col.setSpacing(8)
+        camera_controls_col.setContentsMargins(0, 8, 0, 0)
+        
+        camera_controls_col.addWidget(QLabel("Select Camera"))
+        
+        self.camera_combo = QComboBox()
+        self.camera_combo.setMinimumWidth(140)
+        camera_controls_col.addWidget(self.camera_combo)
+        
+        self.btn_camera_refresh = QPushButton("Refresh")
+        self.btn_camera_connect = QPushButton("Connect")
+        self.btn_camera_view = QPushButton("Start View")
+        
+        for btn in (self.btn_camera_refresh, self.btn_camera_connect, self.btn_camera_view):
+            btn.setFixedWidth(90)
+        
+        camera_controls_col.addWidget(self.btn_camera_refresh)
+        camera_controls_col.addWidget(self.btn_camera_connect)
+        camera_controls_col.addWidget(self.btn_camera_view)
 
+        self.lab_camera_status = QLabel("Camera idle")
+        self.lab_camera_status.setStyleSheet("color: #bfc7d5;")
+        camera_controls_col.addSpacing(8)
+        camera_controls_col.addWidget(self.lab_camera_status)
+        camera_controls_col.addStretch()
+        
+        camera_controls_widget = QWidget()
+        camera_controls_widget.setLayout(camera_controls_col)
+        camera_controls_widget.setFixedWidth(170)
+        
+        # right side: preview
         self.camera_view = QLabel("No camera connected")
         self.camera_view.setAlignment(Qt.AlignCenter)
-        self.camera_view.setMinimumHeight(300)
-        self.camera_view.setMaximumHeight(380)
-        self.camera_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        self.camera_view.setFixedSize(570, 570)
+        self.camera_view.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.camera_view.setStyleSheet("""
             QLabel {
                 background-color: #050505;
@@ -271,29 +307,23 @@ class StageGUI2(QMainWindow):
                 font-size: 15px;
             }
         """)
-        camera_ctrl_row = QHBoxLayout()
-        camera_ctrl_row.setSpacing(6)
-
-        self.camera_combo = QComboBox()
-        self.camera_combo.setMinimumWidth(150)
-
-        self.btn_camera_refresh = QPushButton("Refresh")
-        self.btn_camera_connect = QPushButton("Connect")
-        self.btn_camera_view = QPushButton("Start View")
-
-        camera_ctrl_row.addWidget(QLabel("Select Camera"))
-        camera_ctrl_row.addWidget(self.camera_combo, 1)
-        camera_ctrl_row.addWidget(self.btn_camera_refresh)
-        camera_ctrl_row.addWidget(self.btn_camera_connect)
-        camera_ctrl_row.addWidget(self.btn_camera_view)
-
-        camera_layout.addWidget(self.camera_view)
-        camera_layout.addLayout(camera_ctrl_row)
-
+       
+        # preview container
+        preview_container = QWidget()
+        preview_layout = QVBoxLayout(preview_container)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.addStretch(1)
+        preview_layout.addWidget(self.camera_view, alignment=Qt.AlignCenter)
+        preview_layout.addStretch(1)
+        
+        camera_main_row.addWidget(camera_controls_widget, 0, Qt.AlignTop)
+        camera_main_row.addWidget(preview_container, 1)
+        
+        camera_layout.addLayout(camera_main_row)
+        
         left_layout.addWidget(self.xy_plot, 1)
         left_layout.addWidget(pos_box)
         left_layout.addWidget(self.camera_group)
-
 
         # ----- right side: jog + step/feed
         right_col = QVBoxLayout()
@@ -911,6 +941,7 @@ class StageGUI2(QMainWindow):
         
         cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
         if cap is None or not cap.isOpened():
+            self.lab_camera_status.setText("Failed to connect")
             QMessageBox.warning(self, "Camera", f"Could not open camera {cam_index}.")
             return
         
@@ -923,7 +954,8 @@ class StageGUI2(QMainWindow):
 
         self.btn_camera_connect.setText("Disconnect")
         self.btn_camera_view.setEnabled(True)
-        self._update_camera_placeholder("Camera connected - preview off")
+        self.lab_camera_status.setText(f"Camera {cam_index} connected")
+        self._update_camera_placeholder("")
         self._post_msg(f"Camera {cam_index} connected.")
 
     def _on_camera_view_clicked(self):
@@ -935,6 +967,7 @@ class StageGUI2(QMainWindow):
             self.camera_timer.stop()
             self.camera_preview_live = False
             self.btn_camera_view.setText("Start View")
+            self.lab_camera_status.setText("Preview stopped")
             self._update_camera_placeholder("Camera connected - preview off")
             self._post_msg("Camera preview stopped.")
             return
@@ -942,6 +975,7 @@ class StageGUI2(QMainWindow):
         self.camera_timer.start()
         self.camera_preview_live = True
         self.btn_camera_view.setText("Stop View")
+        self.lab_camera_status.setText("Preview running")
         self._post_msg("Camera preview started.")
 
     def _update_camera_frame(self):
@@ -953,6 +987,7 @@ class StageGUI2(QMainWindow):
             self.camera_timer.stop()
             self.camera_preview_live = False
             self.btn_camera_view.setText("Start View")
+            self.lab_camera_status.setText("Frame grab failed")
             self._update_camera_placeholder("Preview unavailable")
             self._post_msg("WARNING: Failed to read camera frame.")
             return
@@ -965,7 +1000,8 @@ class StageGUI2(QMainWindow):
 
         pix = QPixmap.fromImage(qimg)
         scaled = pix.scaled(
-            self.camera_view.size(),
+            self.camera_view.width(),
+            self.camera_view.height(),
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation,
         )
@@ -990,6 +1026,7 @@ class StageGUI2(QMainWindow):
         self.btn_camera_connect.setText("Connect")
         self.btn_camera_view.setText("Start View")
         self.btn_camera_view.setEnabled(False)
+        self.lab_camera_status.setText("Camera disconnected")
         self._update_camera_placeholder("No camera connected")
         self._post_msg("Camera disconnected.")
 
