@@ -52,6 +52,7 @@ except Exception:
 pg.setConfigOption("background", "#1e1e1e") #dark gray
 pg.setConfigOption("foreground", "#dddddd") #soft white
 
+from backend.routine import RoutineController
 
 # --------------------------- child (gantry) entry ----------------------------
 def gantry_process_main(q_to_gui, q_from_gui, q_from_controller,
@@ -104,6 +105,9 @@ class StageGUI2(QMainWindow):
         self._connected = False
         self._controller_connected = False
         self._joystick_index = 0
+        
+        #backend controllers
+        self.routine = None
 
         # cached state
         self._last_abs = {"x": 0.0, "y": 0.0, "z": 0.0, "e": 0.0}
@@ -730,6 +734,20 @@ class StageGUI2(QMainWindow):
         self.sensors_tab_widget = SensorsTab()
         self.microscope_tab_widget = MicroscopeTab()
         self.automation_tab_widget = AutomationTab()
+        
+        self.routine = RoutineController(
+            command_sink=self._send_gui_msg,
+            alignment_request_cb=self._request_alignment,
+            parent=self,
+        )
+
+        self.routine.log_message.connect(self._post_msg)
+        self.routine.status_changed.connect(self._on_routine_status_changed)
+        
+        # automation tab -> routine backend
+        self.automation_tab_widget.update_requested.connect(self.routine.update_config)
+        self.automation_tab_widget.start_requested.connect(self.routine.start)
+        self.automation_tab_widget.stop_requested.connect(self.routine.stop)
 
         self.pages.addWidget(self.gantry_page)          # index 0
         self.pages.addWidget(self.sensors_tab_widget)   # index 1
@@ -881,7 +899,10 @@ class StageGUI2(QMainWindow):
     def _disconnect_backend(self, silent: bool = False):
         self._stop_all_jog_timers()
         self._stop_controller()
-
+        
+        if self.routine is not None and self.routine.is_running:
+            self.routine.stop()
+            
         self.motion_hint.setText("Connect to enable gantry movement")
 
         if self.p_gantry is not None:
@@ -1095,7 +1116,25 @@ class StageGUI2(QMainWindow):
     def _send_ctrl_msg(self, msg: Dict):
         if self.q_ctrl_to_gantry is not None:
             self.q_ctrl_to_gantry.put(msg)
+            
+   
+    def _on_routine_status_changed(self, payload: dict) -> None:
+        self._post_msg(
+            f"Routine: {payload.get('status', '—')} | "
+            f"{payload.get('phase', '—')} | "
+            f"{payload.get('current_well', '—')}"
+        )
 
+        if hasattr(self.automation_tab_widget, "set_runtime_status"):
+            self.automation_tab_widget.set_runtime_status(
+                status=payload.get("status", "—"),
+                current_well=payload.get("current_well"),
+                phase=payload.get("phase"),
+                highlight_row=payload.get("highlight_row"),
+                highlight_col=payload.get("highlight_col"),
+            )
+
+    
     # --- Disable jog until connected
     def _set_motion_controls_enabled(self, enabled: bool):
         widgets = [
