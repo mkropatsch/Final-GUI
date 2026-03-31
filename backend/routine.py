@@ -176,14 +176,36 @@ class RoutineController(QObject):
         try:
             next_row, next_col, dcol, drow = next(self._move_iter)
         except StopIteration:
-            self.log_message.emit("Routine complete.")
+            self.log_message.emit("Routine complete. Returning to home.")
+            
             self._emit_status(
-                "Complete",
-                phase="Done",
+                "Running",
+                phase="Returning home",
                 current_well=self._well_name(self._row, self._col),
                 highlight_row=self._row,
                 highlight_col=self._col,
             )
+            
+            self._send_command({
+                "type": "gantry_cmd",
+                "cmd": "move_abs",
+                "X": 0.0,
+                "Y": 0.0,
+                "Z": 0.0,
+                "E": 0.0,
+            })
+            self._send_motion_barrier()
+            
+            self.log_message.emit("Returned to set home.")
+            
+            self.status_changed.emit({
+                "status":"Complete",
+                "phase":"Done",
+                "current_well":None,
+                "highlight_row":None,
+                "highlight_col":None,
+            })
+            
             self._running = False
             self._phase = "idle"
             return

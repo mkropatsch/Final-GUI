@@ -152,7 +152,7 @@ class StageGUI2(QMainWindow):
         conn_layout = QHBoxLayout(conn_box)
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Simulator", "Board", "Controller"])
+        self.mode_combo.addItems(["Simulator", "Board"])
         self.mode_combo.setMinimumWidth(140)
 
         self.port_combo = QComboBox()
@@ -201,7 +201,7 @@ class StageGUI2(QMainWindow):
 
         #dark styling
         self.xy_plot.setBackground("#1e1e1e")
-        self.xy_plot.setAspectLocked(True)
+        self.xy_plot.setAspectLocked(False)
         self.xy_plot.showGrid(x=True, y=True, alpha=0.25)
         self.xy_plot.setLabel("left", "Y (mm)", color="#cccccc")
         self.xy_plot.setLabel("bottom", "X (mm)", color="#cccccc")
@@ -210,11 +210,24 @@ class StageGUI2(QMainWindow):
         self.xy_plot.setMaximumHeight(550)
         self.xy_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # Fixed plot:
-        self.xy_plot.setXRange(-10, 110, padding=0)
-        self.xy_plot.setYRange(-10, 110, padding=0)
-        self.xy_plot.setLimits(xMin=-10, xMax=1000, yMin=-10, yMax=1000)
+        # Fixed-size plot window (will pan when needed):
+        self._view_width = 120.0
+        self._view_height = 120.0
+        self._view_margin = 10.0
+        
+        self._view_width = 120.0
+        self._view_height = 120.0
+        self._view_margin = 10.0
 
+        offset = 10.0  # space from edges
+
+        self.xy_plot.setXRange(-offset, self._view_width - offset, padding=0)
+        self.xy_plot.setYRange(-offset, self._view_height - offset, padding=0)
+
+        self.xy_plot.setLimits(
+            xMin=-100000, xMax=100000,
+            yMin=-100000, yMax=100000
+        )
 
         self._xy_point = self.xy_plot.plot(
             [0], [0],
@@ -370,6 +383,36 @@ class StageGUI2(QMainWindow):
         mc.addWidget(self.btn_dn, 2, 1)
         mc.addWidget(self.btn_dr, 2, 2)
         mc.addWidget(self.btn_zm, 2, 3)
+        
+        
+        # ---- Controller box ----
+        self.controller_group = QGroupBox("Controller")
+        controller_layout = QVBoxLayout(self.controller_group)
+        controller_layout.setSpacing(6)
+        
+        controller_top = QHBoxLayout()
+        controller_top.setSpacing(6)
+        
+        self.controller_status = QLabel("Disconnected")
+        self.controller_status.setStyleSheet("color: #bfc7d5;")
+        
+        self.controller_index_combo = QComboBox()
+        self.controller_index_combo.setMinimumWidth(220)
+        
+        self.btn_refresh_controller = QPushButton("Refresh Controllers")
+        self.btn_refresh_controller.setFixedWidth(140)
+        
+        self.btn_controller_toggle = QPushButton("Connect Controller")
+        self.btn_controller_toggle.setFixedWidth(150)
+        
+        controller_top.addWidget(QLabel("Controller"))
+        controller_top.addWidget(self.controller_index_combo)
+        controller_top.addWidget(self.btn_refresh_controller)
+        controller_top.addWidget(self.btn_controller_toggle)
+        controller_top.addStretch
+        
+        controller_layout.addLayout(controller_top)
+        controller_layout.addWidget(self.controller_status)
 
         # ----- Relative move -----
         self.rel_group = QGroupBox()
@@ -668,6 +711,7 @@ class StageGUI2(QMainWindow):
         msg_layout.addWidget(self.msg_box)
 
         right_col.addWidget(self.manual_group)
+        right_col.addWidget(self.controller_group)
         right_col.addWidget(self.rel_group)
         right_col.addWidget(self.abs_group)
         right_col.addWidget(self.ctrl_group)
@@ -712,6 +756,9 @@ class StageGUI2(QMainWindow):
         self.btn_abs_move.clicked.connect(self._on_absolute_move)
 
         self._set_motion_controls_enabled(False)
+        
+        self.btn_controller_toggle.clicked.connect(self._on_controller_toggle_clicked)
+        self.btn_refresh_controller.clicked.connect(self._refresh_controller_list)
 
         # optional dark style
         try:
@@ -722,6 +769,8 @@ class StageGUI2(QMainWindow):
 
         self._on_mode_changed(self.mode_combo.currentText())
         self.refresh_ports()
+        
+        self._refresh_controller_list()
 
         # Initialize camera UI
         self.refresh_cameras()
@@ -737,7 +786,6 @@ class StageGUI2(QMainWindow):
         
         self.routine = RoutineController(
             command_sink=self._send_gui_msg,
-            alignment_request_cb=self._request_alignment,
             parent=self,
         )
 
@@ -759,7 +807,7 @@ class StageGUI2(QMainWindow):
 
     # -------------------------- connection logic --------------------------
     def _on_mode_changed(self, mode: str):
-        hardware_mode = mode in ("Board", "Controller")
+        hardware_mode = mode in ("Board")
         self.port_combo.setEnabled(hardware_mode)
         self.btn_refresh.setEnabled(hardware_mode)
 
@@ -815,13 +863,6 @@ class StageGUI2(QMainWindow):
 
         self._start_backend(simulate=simulate, port=selected_port)
 
-        #start controller only for hardware modes
-        if mode in ("Board", "Controller"):
-            try:
-                self._start_controller(joystick_index=self._joystick_index)
-            except Exception as e:
-                self._post_msg(f"WARNING: Controller failed to start: {e}")
-
         if mode == "Simulator":
             self.status_label.setText("Connected: Simulator")
         else:
@@ -855,9 +896,58 @@ class StageGUI2(QMainWindow):
         self._connected = True
 
     ## adding controller
+    def _refresh_controller_list(self):
+        self.controller_index_combo.clear()
+
+        try:
+            pygame.init()
+            pygame.joystick.init()
+
+            count = pygame.joystick.get_count()
+
+            if count <= 0:
+                self.controller_index_combo.addItem("No controllers detected", -1)
+                self.btn_controller_toggle.setEnabled(False)
+                self.controller_status.setText("No controller detected")
+                self.controller_status.setStyleSheet("color: #ffb347; font-weight: bold;")
+                self._post_msg("No controllers detected.")
+                return
+
+            for i in range(count):
+                js = pygame.joystick.Joystick(i)
+                js.init()
+                name = js.get_name()
+                self.controller_index_combo.addItem(f"{i} - {name}", i)
+
+            self.btn_controller_toggle.setEnabled(True)
+            self.controller_status.setText("Controller available")
+            self.controller_status.setStyleSheet("color: #bfc7d5;")
+            self._post_msg(f"Detected {count} controller(s).")
+
+        except Exception as e:
+            self.controller_index_combo.clear()
+            self.controller_index_combo.addItem("Controller scan failed", -1)
+            self.btn_controller_toggle.setEnabled(False)
+            self.controller_status.setText("Scan failed")
+            self.controller_status.setStyleSheet("color: #ff6b6b; font-weight: bold;")
+            self._post_msg(f"Controller scan failed: {e}")
+    
+    def _controller_available(self, joystick_index: int) -> bool:
+        try:
+            pygame.init()
+            pygame.joystick.init()
+            count = pygame.joystick.get_count()
+            return 0 <= joystick_index < count
+        except Exception:
+            return False
+            
+            
     def _start_controller(self, joystick_index: int = 0):
         if self.q_ctrl_to_gantry is None:
             raise RuntimeError("Controller queue is not initialized.")
+        
+        if not self._controller_available(joystick_index):
+            raise RuntimeError(f"No controller found at joystick index {joystick_index}.")
         
         if self.p_controller is not None:
             try:
@@ -883,6 +973,38 @@ class StageGUI2(QMainWindow):
         self._joystick_index = joystick_index
         self._post_msg(f"Controller process started (joystick index {joystick_index}).")
 
+    def _on_controller_toggle_clicked(self):
+        if not self._connected:
+            QMessageBox.warning(self, "Controller", "Connect the gantry first.")
+            return
+        
+        if self._controller_connected:
+            self._stop_controller()
+            self.btn_controller_toggle.setText("Connect Controller")
+            self.controller_status.setText("Disconnected")
+            self.controller_status.setStyleSheet("color: #bfc7d5;")
+            self._post_msg("Controller disconnected.")
+            return
+        
+        joystick_index = self.controller_index_combo.currentData()
+        
+        if joystick_index is None or joystick_index < 0:
+            QMessageBox.warning(self, "Controller", "No valid controller is selected.")
+            return
+        
+        try:
+            self._start_controller(joystick_index=joystick_index)
+            self.btn_controller_toggle.setText("Disconnect Controller")
+            self.controller_status.setText(f"Connected ({self.controller_index_combo.currentText()})")
+            self.controller_status.setStyleSheet("color: #66dd88; font-weight: bold;")
+            self._post_msg(f"Controller connected on index {joystick_index}.")
+        except Exception as e:
+            QMessageBox.warning(self, "Controller", f"Could not start controller: {e}")
+            self.controller_status.setText("Connection failed")
+            self.controller_status.setStyleSheet("color: #ff6b6b; font-weight: bold;")
+            self._post_msg(f"WARNING: Controller failed to start: {e}")
+
+
     def _stop_controller(self):
         if self.p_controller is not None:
             try:
@@ -894,6 +1016,12 @@ class StageGUI2(QMainWindow):
         self.p_controller = None
         self.q_gui_to_controller = None
         self._controller_connected = False
+        
+        if hasattr(self, "btn_controller_toggle"):
+            self.btn_controller_toggle.setText("Connect Controller")
+        if hasattr(self, "controller_status"):
+            self.controller_status.setText("Disconnected")
+            self.controller_status.setStyleSheet("color: #bfc7d5;")
 
 
     def _disconnect_backend(self, silent: bool = False):
@@ -1311,6 +1439,8 @@ class StageGUI2(QMainWindow):
         self._last_abs.update({"x": ax, "y": ay, "z": az, "e": ae})
 
         self._xy_point.setData([ax], [ay])
+        self._autopan_xy_view(ax, ay)
+        
         self.lab_x.setText(f"{ax:.3f}")
         self.lab_y.setText(f"{ay:.3f}")
         self.lab_z.setText(f"{az:.3f}")
@@ -1325,6 +1455,38 @@ class StageGUI2(QMainWindow):
             self.sld_feed.setValue(val)
             self.sld_feed.blockSignals(False)
             self.lab_feed.setText(f"{val} mm/min")
+
+    def _autopan_xy_view(self, x: float, y: float):
+        vb = self.xy_plot.getViewBox()
+
+        x_min, x_max = vb.viewRange()[0]
+        y_min, y_max = vb.viewRange()[1]
+
+        changed = False
+
+        # pan X if point gets too close to left/right edge
+        if x < x_min + self._view_margin:
+            x_min = x - self._view_margin
+            x_max = x_min + self._view_width
+            changed = True
+        elif x > x_max - self._view_margin:
+            x_max = x + self._view_margin
+            x_min = x_max - self._view_width
+            changed = True
+            
+        # pan Y if point gets too close to top/bottom edge
+        if y < y_min + self._view_margin:
+            y_min = y - self._view_margin
+            y_max = y_min + self._view_height
+            changed = True
+        elif y > y_max - self._view_margin:
+            y_max = y + self._view_margin
+            y_min = y_max - self._view_height
+            changed = True
+
+        if changed:
+            self.xy_plot.setXRange(x_min, x_max, padding=0)
+            self.xy_plot.setYRange(y_min, y_max, padding=0)
 
     # ------------------------------ messages ------------------------------
     def _post_msg(self, text: str):
