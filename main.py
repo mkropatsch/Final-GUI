@@ -56,7 +56,8 @@ from backend.routine import RoutineController
 
 # --------------------------- child (gantry) entry ----------------------------
 def gantry_process_main(q_to_gui, q_from_gui, q_from_controller,
-                        simulate: bool, port: str | None = None) -> None:
+                        simulate: bool,
+                        ports: dict[str, str | None] | None = None) -> None:
     from backend.gantry import GantrySystem
 
     g = GantrySystem(
@@ -64,7 +65,7 @@ def gantry_process_main(q_to_gui, q_from_gui, q_from_controller,
         q_from_gui=q_from_gui,
         q_from_controller=q_from_controller,
         simulate=simulate,
-        port=port,
+        ports=ports,
     )
     g.run()
 
@@ -106,11 +107,15 @@ class StageGUI2(QMainWindow):
         self._controller_connected = False
         self._joystick_index = 0
         
+        self._active_target = "needle"
+        
         #backend controllers
         self.routine = None
 
         # cached state
         self._last_abs = {"x": 0.0, "y": 0.0, "z": 0.0, "e": 0.0}
+        self._needle_abs = {"x": 0.0, "y": 0.0, "z": 0.0, "e": 0.0}
+        self._camera_stage_abs = {"x": 0.0, "y": 0.0, "z": 0.0, "e": 0.0}
 
         ## Camera state
         self.camera_cap = None
@@ -149,37 +154,65 @@ class StageGUI2(QMainWindow):
 
         # -------------------------- connection row -------------------------
         conn_box = QGroupBox("Connection")
-        conn_layout = QHBoxLayout(conn_box)
+        conn_layout = QVBoxLayout(conn_box)
+        conn_layout.setSpacing(8)
+        
+        # top row
+        conn_top = QHBoxLayout()
+        conn_top.setSpacing(10)
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["Simulator", "Board"])
-        self.mode_combo.setMinimumWidth(140)
+        self.mode_combo.setMinimumWidth(120)
 
-        self.port_combo = QComboBox()
-        self.port_combo.setMinimumWidth(220)
-
-        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh = QPushButton("Refresh Ports")
         self.btn_connect = QPushButton("Connect")
 
-        self.status_label = QLabel("Disconnected")
-        self.status_label.setMinimumWidth(180)
-        self.status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.motion_target_combo = QComboBox()
+        self.motion_target_combo.addItems(["Needle", "Camera", "Both"])
+        self.motion_target_combo.setMinimumWidth(120)
 
         self.motion_hint = QLabel("Connect to enable movement.")
         self.motion_hint.setStyleSheet("color: #ffaa00; font-weight: bold;")
 
-        conn_layout.addWidget(QLabel("Mode"))
-        conn_layout.addWidget(self.mode_combo)
-        conn_layout.addSpacing(12)
-        conn_layout.addWidget(QLabel("Port"))
-        conn_layout.addWidget(self.port_combo)
-        conn_layout.addWidget(self.btn_refresh)
-        conn_layout.addWidget(self.btn_connect)
-        conn_layout.addSpacing(12)
-        conn_layout.addWidget(self.status_label)
+        conn_top.addWidget(QLabel("Mode"))
+        conn_top.addWidget(self.mode_combo)
+        conn_top.addSpacing(10)
+        conn_top.addWidget(QLabel("Move Target"))
+        conn_top.addWidget(self.motion_target_combo)
+        conn_top.addSpacing(10)
+        conn_top.addWidget(self.btn_refresh)
+        conn_top.addWidget(self.btn_connect)
+        conn_top.addStretch()
+        conn_top.addWidget(self.motion_hint)
+        
+        # bottom row
+        conn_bottom = QGridLayout()
+        conn_bottom.setHorizontalSpacing(10)
+        conn_bottom.setVerticalSpacing(6)
+        
+        self.needle_port_combo = QComboBox()
+        self.needle_port_combo.setMinimumWidth(240)
+        
+        self.camera_stage_port_combo = QComboBox()
+        self.camera_stage_port_combo.setMinimumWidth(240)
+        
+        self.needle_status_label = QLabel("Needle Stage: Disconnected")
+        self.needle_status_label.setMinimumWidth(220)
+        
+        self.camera_stage_status_label = QLabel("Camera Stage: Disconnected")
+        self.camera_stage_status_label.setMinimumWidth(220)
+        
+        conn_bottom.addWidget(QLabel("Needle Stage Port"), 0, 0)
+        conn_bottom.addWidget(self.needle_port_combo, 0, 1)
+        conn_bottom.addWidget(self.needle_status_label, 0, 2)
+        
+        conn_bottom.addWidget(QLabel("Camera Stage Port"), 1, 0)
+        conn_bottom.addWidget(self.camera_stage_port_combo, 1, 1)
+        conn_bottom.addWidget(self.camera_stage_status_label, 1, 2)
     
-        conn_layout.addStretch()
-        conn_layout.addWidget(self.motion_hint)
+        conn_layout.addLayout(conn_top)
+        conn_layout.addLayout(conn_bottom)
 
         self.gantry_layout.addWidget(conn_box)
 
@@ -409,7 +442,7 @@ class StageGUI2(QMainWindow):
         controller_top.addWidget(self.controller_index_combo)
         controller_top.addWidget(self.btn_refresh_controller)
         controller_top.addWidget(self.btn_controller_toggle)
-        controller_top.addStretch
+        controller_top.addStretch()
         
         controller_layout.addLayout(controller_top)
         controller_layout.addWidget(self.controller_status)
@@ -732,6 +765,7 @@ class StageGUI2(QMainWindow):
 
         # ----------------------------- signals -------------------------------
         self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
+        self.motion_target_combo.currentTextChanged.connect(self._on_motion_target_changed)
         self.btn_refresh.clicked.connect(self.refresh_ports)
         self.btn_connect.clicked.connect(self._on_connect_clicked)
 
@@ -768,6 +802,9 @@ class StageGUI2(QMainWindow):
             pass
 
         self._on_mode_changed(self.mode_combo.currentText())
+        
+        self._on_motion_target_changed(self.motion_target_combo.currentText())
+        
         self.refresh_ports()
         
         self._refresh_controller_list()
@@ -807,38 +844,52 @@ class StageGUI2(QMainWindow):
 
     # -------------------------- connection logic --------------------------
     def _on_mode_changed(self, mode: str):
-        hardware_mode = mode in ("Board")
-        self.port_combo.setEnabled(hardware_mode)
+        hardware_mode = mode == "Board"
+        
+        self.needle_port_combo.setEnabled(hardware_mode)
+        self.camera_stage_port_combo.setEnabled(hardware_mode)
         self.btn_refresh.setEnabled(hardware_mode)
 
         if hardware_mode:
             self.refresh_ports()
         else:
-            self.port_combo.clear()
-            self.port_combo.addItem("(not needed for simulator)")
+            self.needle_port_combo.clear()
+            self.camera_stage_port_combo.clear()
+            self.needle_port_combo.addItem("(not needed for simulator)")
+            self.camera_stage_port_combo.addItem("(not needed for simulator)")
 
+    def _on_motion_target_changed(self, text: str):
+        self._active_target = text.strip().lower()
+        self._post_msg(f"Motion target set to {text}.")
+    
     def refresh_ports(self):
-        self.port_combo.clear()
-
-        if not self.port_combo.isEnabled():
-            self.port_combo.addItem("(not needed for simulator)")
+        self.needle_port_combo.clear()
+        self.camera_stage_port_combo.clear()
+        
+        if not self.needle_port_combo.isEnabled():
+            self.needle_port_combo.addItem("(not needed for simulator)")
+            self.camera_stage_port_combo.addItem("(not needed for simulator)")
             return
-
+        
         if list_ports is None:
-            self.port_combo.addItem("(pyserial not available)")
+            self.needle_port_combo.addItem("(pyserial not available)")
+            self.camera_stage_port_combo.addItem("(pyserial not available)")
             return
-
+        
         ports = list(list_ports.comports())
         if not ports:
-            self.port_combo.addItem("(no ports found)")
+            self.needle_port_combo.addItem("(no ports found)")
+            self.camera_stage_port_combo.addItem("(no ports found)")
             return
-
+        
         for p in ports:
             label = f"{p.device}"
             if p.description:
-                label += f" — {p.description}"
-            self.port_combo.addItem(label, p.device)
-
+                label += f" - {p.description}"
+                
+            self.needle_port_combo.addItem(label, p.device)
+            self.camera_stage_port_combo.addItem(label, p.device)
+        
     def _on_connect_clicked(self):
         if self._connected:
             self._disconnect_backend()
@@ -846,35 +897,61 @@ class StageGUI2(QMainWindow):
 
         mode = self.mode_combo.currentText()
         simulate = mode == "Simulator"
-        selected_port = None
+        
+        needle_port = None
+        camera_port = None
 
         self.motion_hint.setText("Ready")
 
         if not simulate:
-            if self.port_combo.count() == 0:
+            if self.needle_port_combo.count() == 0 and self.camera_stage_port_combo.count() == 0:
                 QMessageBox.warning(self, "Connect", "No ports are available.")
                 return
-            current_text = self.port_combo.currentText().strip()
-            if not current_text or current_text.startswith("("):
-                QMessageBox.warning(self, "Connect", "Please select a valid port.")
-                return
             
-            selected_port = self.port_combo.currentData() or self.port_combo.currentText()
+            needle_text = self.needle_port_combo.currentText().strip()
+            camera_text = self.camera_stage_port_combo.currentText().strip()
+            
+            if needle_text and not needle_text.startswith("("):
+                needle_port = self.needle_port_combo.currentData() or self.needle_port_combo.currentText()
+                
+            if camera_text and not camera_text.startswith("("):
+                camera_port = self.camera_stage_port_combo.currentData() or self.camera_stage_port_combo.currentText()
+                
+            if needle_port is None and camera_port is None:
+                QMessageBox.warning(self, "Connect", "Please select at least one valid stage port.")
+                return
+            if needle_port is not None and camera_port is not None and needle_port == camera_port:
+                QMessageBox.warning(self, "Connect", "Needle and camera stage cannot use the same serial port.")
+                return
 
-        self._start_backend(simulate=simulate, port=selected_port)
+        self._start_backend(
+            simulate=simulate,
+            ports={
+                "needle": needle_port,
+                "camera": camera_port,
+            }
+        )
 
-        if mode == "Simulator":
-            self.status_label.setText("Connected: Simulator")
+        if simulate:
+            self.needle_status_label.setText("Needle: Simulator")
+            self.camera_stage_status_label.setText("Camera Stage: Simulator")
         else:
-            self.status_label.setText(f"Connected: {mode} ({selected_port})")
+            self.needle_status_label.setText(
+                f"Needle Stage: {'Connected' if needle_port else 'Not selected'}"
+            )
+            self.camera_stage_status_label.setText(
+                f"Camera Stage: {'Connected' if camera_port else 'Not selected'}"
+            )
 
         self.btn_connect.setText("Disconnect")
         self.motion_hint.setText("Ready")
         self.motion_hint.setStyleSheet("color: #55ff55; font-weight: bold;")
         self._set_motion_controls_enabled(True)
-        self._post_msg(f"{mode} connection started.")
+        self._post_msg(
+            f"{mode} backend started. Needle Stage={needle_port or 'None'}, Camera Stage={camera_port or 'None'}"
+        )
 
-    def _start_backend(self, simulate: bool, port: str | None = None):
+    def _start_backend(self, simulate: bool, ports: dict[str, str | None] | None = None):
         self._disconnect_backend(silent=True)
 
         self.q_gantry_to_gui = self.ctx.Queue(maxsize=1000)
@@ -888,7 +965,7 @@ class StageGUI2(QMainWindow):
                 self.q_gui_to_gantry,
                 self.q_ctrl_to_gantry,
                 simulate,
-                port,
+                ports,
             ),
             daemon=True,
         )
@@ -1048,7 +1125,8 @@ class StageGUI2(QMainWindow):
         self._connected = False
 
         self.btn_connect.setText("Connect")
-        self.status_label.setText("Disconnected")
+        self.needle_status_label.setText("Needle Stage: Disconnected")
+        self.camera_stage_status_label.setText("Camera Stage: Disconnected")
         self.motion_hint.setText("Connect to enable gantry movement")
         self.motion_hint.setStyleSheet("color: #ffaa00; font-weight: bold;")
         self._set_motion_controls_enabled(False)
@@ -1237,9 +1315,20 @@ class StageGUI2(QMainWindow):
             t.stop()
 
     # ---------------------------- send helpers ----------------------------
-    def _send_gui_msg(self, msg: Dict):
-        if self.q_gui_to_gantry is not None:
-            self.q_gui_to_gantry.put(msg)
+    def _send_gui_msg(self, msg: dict):
+        if not self._connected or self.q_gui_to_gantry is None:
+            return
+        
+        if not isinstance(msg, dict):
+            return
+        
+        msg = dict(msg)
+        
+        # add default target for motion-related / stage-related commands
+        if "target" not in msg and msg.get("type") in ("gantry_cmd", "gcode", "home_all", "fan_set"):
+            msg["target"] = self._active_target
+            
+        self.q_gui_to_gantry.put(msg)
 
     def _send_ctrl_msg(self, msg: Dict):
         if self.q_ctrl_to_gantry is not None:
@@ -1285,17 +1374,44 @@ class StageGUI2(QMainWindow):
         if not self._connected:
             self._stop_all_jog_timers()
             self._post_msg("WARNING: Not connected.")
-            #QMessageBox.warning(self, "Warning", "Not connected.")
             return
-        self._send_ctrl_msg({"type": "input", "cmd": "xy_motion", "value": (sx, sy)})
+        
+        try:
+            step = float(self.in_xy.text())
+        except ValueError:
+            self._post_msg("WARNING: Invalid XY step size.")
+            return
+        
+        self._send_gui_msg({
+            "type": "gantry_cmd",
+            "cmd": "move_rel",
+            "dx": sx * step,
+            "dy": sy * step,
+            "dz": 0.0,
+            "de": 0.0,
+        })
+
 
     def _jog_z(self, s: int):
         if not self._connected:
             self._stop_all_jog_timers()
             self._post_msg("WARNING: Not connected.")
-            #QMessageBox.warning(self, "Warning", "Not connected.")
             return
-        self._send_ctrl_msg({"type": "input", "cmd": "z_motion", "value": (0, s)})
+        
+        try:
+            step = float(self.in_z.text())
+        except ValueError:
+            self._post_msg("WARNING: Invalid Z step size.")
+            return
+        
+        self._send_gui_msg({
+            "type": "gantry_cmd",
+            "cmd": "move_rel",
+            "dx": 0.0,
+            "dy": 0.0,
+            "dz": s * step,
+            "de": 0.0,
+        })
 
     # -------------------------- control actions --------------------------
     def _apply_steps_to_gantry(self):
@@ -1437,6 +1553,21 @@ class StageGUI2(QMainWindow):
         ae = float(s.get("e", 0.0))
 
         self._last_abs.update({"x": ax, "y": ay, "z": az, "e": ae})
+        
+        # new separate stage caches
+        self._needle_abs = {
+            "x": float(s.get("needle_x", ax)),
+            "y": float(s.get("needle_y", ay)),
+            "z": float(s.get("needle_z", az)),
+            "e": float(s.get("needle_e", ae)),
+        }
+        
+        self._camera_stage_abs = {
+            "x": float(s.get("camera_x", 0.0)),
+            "y": float(s.get("camera_y", 0.0)),
+            "z": float(s.get("camera_z", 0.0)),
+            "e": float(s.get("camera_e", 0.0))
+        }
 
         self._xy_point.setData([ax], [ay])
         self._autopan_xy_view(ax, ay)
