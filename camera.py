@@ -64,7 +64,7 @@ def detect_edge_points_and_main_line(frame):
     angles = np.arctan2(gy, gx)
 
     # Keep only strong edges
-    strong_keep = strengths > 50
+    strong_keep = strengths > 80
 
     # Keep edges that are not too close to purely horizontal/vertical
     direction_keep = np.abs(np.sin(angles)) > 0.3
