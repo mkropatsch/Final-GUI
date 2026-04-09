@@ -882,6 +882,10 @@ class StageGUI2(QMainWindow):
             self.camera_stage_port_combo.addItem("(no ports found)")
             return
         
+        # Allow each stage to be skipped independently
+        self.needle_port_combo.addItem("-- Not Connected --", None)
+        self.camera_stage_port_combo.addItem("-- Not Connected --", None)
+        
         for p in ports:
             label = f"{p.device}"
             if p.description:
@@ -908,14 +912,9 @@ class StageGUI2(QMainWindow):
                 QMessageBox.warning(self, "Connect", "No ports are available.")
                 return
             
-            needle_text = self.needle_port_combo.currentText().strip()
-            camera_text = self.camera_stage_port_combo.currentText().strip()
-            
-            if needle_text and not needle_text.startswith("("):
-                needle_port = self.needle_port_combo.currentData() or self.needle_port_combo.currentText()
-                
-            if camera_text and not camera_text.startswith("("):
-                camera_port = self.camera_stage_port_combo.currentData() or self.camera_stage_port_combo.currentText()
+            # currentData() is None for "-- Not Connected --" or placeholder items
+            needle_port = self.needle_port_combo.currentData()
+            camera_port = self.camera_stage_port_combo.currentData()
                 
             if needle_port is None and camera_port is None:
                 QMessageBox.warning(self, "Connect", "Please select at least one valid stage port.")
