@@ -8,7 +8,7 @@ import threading
 import time
 from collections import deque
 
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QComboBox,
     QFrame,
@@ -170,6 +170,8 @@ class SensorCard(QFrame):
 
 
 class SensorsTab(QWidget):
+    incubator_connected = pyqtSignal(object) # emits the IncubatorSerial instance
+    
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
 
@@ -409,6 +411,7 @@ class SensorsTab(QWidget):
 
         self.reader.start()
         self.reader.set_setpoint(self._last_setpoint)
+        self.incubator_connected.emit(self.reader)
         self.btn_connect.setText("Disconnect")
         self.conn_status.setText(f"Connecting to {port}…")
 

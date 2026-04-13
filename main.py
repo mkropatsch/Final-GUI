@@ -53,6 +53,7 @@ pg.setConfigOption("background", "#1e1e1e") #dark gray
 pg.setConfigOption("foreground", "#dddddd") #soft white
 
 from backend.routine import RoutineController
+from backend.incubator import IncubatorSerial
 
 # --------------------------- child (gantry) entry ----------------------------
 def gantry_process_main(q_to_gui, q_from_gui, q_from_controller,
@@ -111,6 +112,7 @@ class StageGUI2(QMainWindow):
         
         #backend controllers
         self.routine = None
+        self.incubator: IncubatorSerial | None = None
 
         # cached state
         self._last_abs = {"x": 0.0, "y": 0.0, "z": 0.0, "e": 0.0}
@@ -823,9 +825,11 @@ class StageGUI2(QMainWindow):
         
         self.routine = RoutineController(
             command_sink=self._send_gui_msg,
+            dispense_sink=self.incubator.pump_forward if self.incubator else None,
             parent=self,
         )
-
+        self.sensors_tab_widget.incubator_connected.connect(self._on_incubator_connected)
+        
         self.routine.log_message.connect(self._post_msg)
         self.routine.status_changed.connect(self._on_routine_status_changed)
         
@@ -833,6 +837,7 @@ class StageGUI2(QMainWindow):
         self.automation_tab_widget.update_requested.connect(self.routine.update_config)
         self.automation_tab_widget.start_requested.connect(self.routine.start)
         self.automation_tab_widget.stop_requested.connect(self.routine.stop)
+        self.automation_tab_widget.test_dispense_requested.connect(self._on_test_dispense)
 
         self.pages.addWidget(self.gantry_page)          # index 0
         self.pages.addWidget(self.sensors_tab_widget)   # index 1
@@ -1333,6 +1338,16 @@ class StageGUI2(QMainWindow):
         if self.q_ctrl_to_gantry is not None:
             self.q_ctrl_to_gantry.put(msg)
             
+    def _on_incubator_connected(self, incubator: IncubatorSerial) -> None:
+        self.incubator = incubator
+        self.routine._dispense = incubator.pump_forward
+        self._post_msg("Incubator connected — pump armed for routine.")
+    
+    def _on_test_dispense(self, duration_ms: int) -> None:
+        if self.incubator is not None:
+            self.incubator.pump_forward(duration_ms)
+        else:
+            self._post_msg("WARNING: Incubator not connected, cannot test dispense.")
    
     def _on_routine_status_changed(self, payload: dict) -> None:
         self._post_msg(

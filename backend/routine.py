@@ -16,6 +16,8 @@ class RoutineConfig:
     dz: float = 0.0
     wait_s: float = 1.0
     serpentine: bool = True
+    dispense_ms: int = 0
+    retract_ms: int = 0
 
 
 class RoutineController(QObject):
@@ -25,11 +27,13 @@ class RoutineController(QObject):
     def __init__(
         self,
         command_sink: Callable[[dict], None],
+        dispense_sink: Callable[[int], None] | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
 
         self._send_command = command_sink
+        self._dispense = dispense_sink
 
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -144,7 +148,10 @@ class RoutineController(QObject):
 
     def _do_z_wait(self) -> None:
         self._emit_status("Running", phase="Wait")
-
+        
+        if self._dispense and self._config.dispense_ms > 0:
+            self._dispense(self._config.dispense_ms)
+            
         wait_ms = max(0, int(self._config.wait_s * 1000))
         self._phase = "z_up"
         self._timer.start(wait_ms)
@@ -251,6 +258,8 @@ class RoutineController(QObject):
             dz=_f("dz", 0.0),
             wait_s=_f("wait_s", 1.0),
             serpentine=bool(raw.get("serpentine", True)),
+            dispense_ms = int(_f("dispense_ms", 0)),
+            retract_ms = int(_f("retract_ms", 0)),
         )
 
     def _grid_iter(
