@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QSizePolicy,
@@ -38,10 +39,7 @@ except Exception:
     HAS_MPL = False
 
 
-PATTERN = re.compile(
-    r"CO2:\s*(\d+)\s*ppm\s*\|\s*Temp:\s*([-\d\.]+)\s*°C\s*\|\s*RH:\s*([-\d\.]+)\s*%\s*\|\s*\[(?:O₂|O2|O)\]\s*([-\d\.]+)",
-    re.IGNORECASE,
-)
+from backend.incubator import IncubatorSerial, INCUBATOR_PATTERN
 
 
 class SerialReader(threading.Thread):
@@ -175,8 +173,10 @@ class SensorsTab(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
 
-        self.reader: SerialReader | SimReader | None = None
+        self.reader: IncubatorSerial | SimReader | None = None
         self.q: queue.Queue = queue.Queue()
+        self._last_setpoint: float = 37.0
+        
         self.t0 = time.time()
         self.is_recording = True
 
@@ -248,6 +248,24 @@ class SensorsTab(QWidget):
             cards_layout.setColumnStretch(col, 1)
 
         root.addWidget(cards_box)
+
+        heater_box = QGroupBox("Heater Control")
+        heater_layout = QHBoxLayout(heater_box)
+        self.setpoint_input = QLineEdit("37.0")
+        self.setpoint_input.setMaximumWidth(80)
+        self.btn_apply_setpoint = QPushButton("Apply")
+        self.btn_apply_setpoint.clicked.connect(self._on_apply_setpoint)
+        self.lab_heater_pwm = QLabel("Heater PWM: —")
+        self.lab_pump_state = QLabel("Pump: —")
+        heater_layout.addWidget(QLabel("Setpoint (°C)"))
+        heater_layout.addWidget(self.setpoint_input)
+        heater_layout.addWidget(self.btn_apply_setpoint)
+        heater_layout.addSpacing(20)
+        heater_layout.addWidget(self.lab_heater_pwm)
+        heater_layout.addSpacing(20)
+        heater_layout.addWidget(self.lab_pump_state)
+        heater_layout.addStretch()
+        root.addWidget(heater_box)
 
         self.air_status = QLabel("Status: —")
         self.air_status.setStyleSheet("font-size: 16px; font-weight: 700; color: #d8e2ee; padding: 2px 4px;")
@@ -387,9 +405,10 @@ class SensorsTab(QWidget):
             if not HAS_SERIAL:
                 QMessageBox.critical(self, "pyserial missing", "Install pyserial or choose simulation mode.")
                 return
-            self.reader = SerialReader(port=port, baud=115200, out_queue=self.q)
+            self.reader = IncubatorSerial(port=port, out_queue=self.q)
 
         self.reader.start()
+        self.reader.set_setpoint(self._last_setpoint)
         self.btn_connect.setText("Disconnect")
         self.conn_status.setText(f"Connecting to {port}…")
 
@@ -441,7 +460,13 @@ class SensorsTab(QWidget):
             self.card_rh.set_value(f"{rh:.1f}")
         if o2 is not None:
             self.card_o2.set_value(f"{o2:.2f}")
-
+        if d.get("heater_pwm") is not None:
+            self.lab_heater_pwm.setText(f"Heater PWM: {d['heater_pwm']}/255")
+        if d.get("pump_state") is not None:
+            self.lab_pump_state.setText(f"Pump: {d['pump_state']}")
+        if d.get("setpoint") is not None:
+            self._last_setpoint = d["setpoint"]
+            
         if HAS_MPL and self.is_recording and co2 is not None:
             t = time.time() - self.t0
             self.ts.append(t)
@@ -480,6 +505,16 @@ class SensorsTab(QWidget):
 
         if co2 is not None:
             self._apply_air_status(float(co2))
+    
+    def _on_apply_setpoint(self) -> None:
+        try:
+            val = float(self.setpoint_input.text())
+        except ValueError:
+            return
+        self._last_setpoint = val
+        if isinstance(self.reader, IncubatorSerial):
+            self.reader.set_setpoint(val)
+
 
     def _autoscale(self, ax, x, y, pad_frac: float = 0.08, pad_abs: float = 0.02) -> None:
         if len(x) < 2 or len(y) < 2:
