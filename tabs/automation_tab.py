@@ -143,6 +143,7 @@ class AutomationTab(QWidget):
     update_requested = pyqtSignal(dict)
     start_requested = pyqtSignal(dict)
     stop_requested = pyqtSignal()
+    test_dispense_requested = pyqtSignal(int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -248,6 +249,28 @@ class AutomationTab(QWidget):
         auto_form.addRow(self.chk_serpentine)
 
         right_col.addWidget(auto_group)
+        
+        dispense_group = QGroupBox("Dispense Settings")
+        dispense_group.setStyleSheet(
+            "QGroupBox::title { font-size: 16px; font-weight: bold; color: #ffffff; padding: 0 5px; }"
+        )
+        dispense_form = QFormLayout(dispense_group)
+        dispense_form.setSpacing(8)
+        
+        self.in_dispense_ms = QLineEdit()
+        self.in_dispense_ms.setPlaceholderText("e.g. 200")
+        self.in_retract_ms = QLineEdit()
+        self.in_retract_ms.setPlaceholderText("e.g. 50")
+
+        self.btn_test_dispense = QPushButton("Test Dispense")
+        self.btn_test_dispense.clicked.connect(self._on_test_dispense)
+
+        dispense_form.addRow("Dispense (ms)", self.in_dispense_ms)
+        dispense_form.addRow("Retract (ms)", self.in_retract_ms)
+        dispense_form.addRow(self.btn_test_dispense)
+
+        right_col.addWidget(dispense_group)
+
 
         status_group = QGroupBox("Routine Status")
         status_group.setStyleSheet(
@@ -348,6 +371,11 @@ class AutomationTab(QWidget):
         self.lab_status.setText("Stopped")
         self.lab_phase.setText("Phase: Stopped")
         self.stop_requested.emit()
+        
+    def _on_test_dispense(self) -> None:
+        self.test_dispense_requested.emit(
+            int(self.in_dispense_ms.text().strip() or 0)
+        )
 
     def set_runtime_status(
         self,
@@ -372,6 +400,8 @@ class AutomationTab(QWidget):
             "dz": self.in_dz.text().strip(),
             "wait_s": self.in_wait.text().strip(),
             "serpentine": self.chk_serpentine.isChecked(),
+            "dispense_ms": self.in_dispense_ms.text().strip(),
+            "retract_ms": self.in_retract_ms.text().strip(),
         }
 
 

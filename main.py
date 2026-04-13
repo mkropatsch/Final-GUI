@@ -48,6 +48,14 @@ try:
 except Exception:
     list_ports = None
 
+try:
+    sys.path.append(r'C:\Users\macke\Desktop\Project Code\camera_light_test')
+    from DNX64 import DNX64 as _DNX64Class
+    _DNX64_DLL = r'C:\Users\macke\Desktop\Project Code\camera_light_test\DNX64.dll'
+except Exception:
+    _DNX64Class = None
+    _DNX64_DLL = None
+
 
 pg.setConfigOption("background", "#1e1e1e") #dark gray
 pg.setConfigOption("foreground", "#dddddd") #soft white
@@ -1188,6 +1196,14 @@ class StageGUI2(QMainWindow):
         self.lab_camera_status.setText(f"Camera {cam_index} connected")
         self._update_camera_placeholder("")
         self._post_msg(f"Camera {cam_index} connected.")
+
+        if _DNX64Class is not None:
+            try:
+                dnx = _DNX64Class(_DNX64_DLL)
+                dnx.SetVideoDeviceIndex(cam_index)
+                dnx.SetLEDState(0, 0)
+            except Exception:
+                pass
 
     def _on_camera_view_clicked(self):
         if not self.camera_connected or self.camera_cap is None:
