@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import math
+import os
 import queue
 import random
 import threading
 import time
 from collections import deque
+from datetime import datetime
 
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
@@ -168,6 +171,27 @@ class SensorCard(QFrame):
     def set_value(self, text: str) -> None:
         self.value_label.setText(text)
 
+    def set_alert(self, level: str) -> None:
+        """level: 'normal', 'warn', 'critical'"""
+        colors = {
+            "normal":   self.accent,
+            "warn":     "#ffcb6b",
+            "critical": "#ff5555",
+        }
+        color = colors.get(level, self.accent)
+        self.setStyleSheet(
+            f"""
+            QFrame#SensorCard {{
+                background-color: #182433;
+                border: 1px solid #31465f;
+                border-left: 5px solid {color};
+                border-radius: 10px;
+            }}
+            QLabel {{ border: none; }}
+            """
+        )
+        self.value_label.setStyleSheet(f"color: {color}; font-size: 24px; font-weight: 700;")
+
 
 class SensorsTab(QWidget):
     incubator_connected = pyqtSignal(object) # emits the IncubatorSerial instance
@@ -184,6 +208,22 @@ class SensorsTab(QWidget):
 
         self.T_GOOD = 800
         self.T_WARN = 1500
+
+        # Thresholds for alerts
+        self.THRESH_TEMP_DELTA  = 2.0    # °C above/below setpoint
+        self.THRESH_CO2_HIGH    = 2000   # ppm
+        self.THRESH_CO2_LOW     = 300    # ppm
+        self.THRESH_RH_HIGH     = 90.0   # %
+        self.THRESH_RH_LOW      = 20.0   # %
+
+        # JSON logging
+        self._log_dir = os.path.join(os.getcwd(), "sensor_logs")
+        self._log_path: str | None = None
+        self._log_buffer: list = []
+        self._log_flush_every = 10       # flush to disk every N readings
+        self._log_flush_count = 0
+        self._session_start: str | None = None
+        self._alert_active: dict = {}    # tracks active alerts to avoid repeated pop-ups
 
         self.ts = deque(maxlen=600)
         self.co2_series = deque(maxlen=600)
@@ -415,20 +455,139 @@ class SensorsTab(QWidget):
 
 
     def toggle_recording(self) -> None:
-        # warning if nothing is connected:
         if self.reader is None:
             QMessageBox.warning(self, "Not Connected", "Please connect first.")
             return
-        
+
         self.is_recording = not self.is_recording
-        
+
         if self.is_recording:
             self.btn_record.setText("Stop Recording")
-            self.conn_status.setText("Recording resumed.")
+            self._start_log()
+            self.conn_status.setText("Recording started.")
         else:
             self.btn_record.setText("Start Recording")
-            self.conn_status.setText("Recording paused.")
+            self._flush_log(final=True)
+            self.conn_status.setText(f"Recording saved: {os.path.basename(self._log_path or '')}")
 
+
+    def _start_log(self) -> None:
+        os.makedirs(self._log_dir, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._log_path = os.path.join(self._log_dir, f"sensors_{stamp}.json")
+        self._session_start = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._log_buffer = []
+        self._log_flush_count = 0
+        self._alert_active = {}
+
+    def _check_thresholds(self, d: dict) -> list[str]:
+        alerts = []
+        temp = d.get("temp")
+        co2 = d.get("co2")
+        rh = d.get("rh")
+        setpoint = d.get("setpoint", self._last_setpoint)
+        pwm = d.get("heater_pwm")
+
+        if temp is not None:
+            if temp > setpoint + self.THRESH_TEMP_DELTA:
+                alerts.append("temp_high")
+            elif temp < setpoint - self.THRESH_TEMP_DELTA:
+                alerts.append("temp_low")
+        if co2 is not None:
+            if co2 > self.THRESH_CO2_HIGH:
+                alerts.append("co2_high")
+            elif co2 < self.THRESH_CO2_LOW:
+                alerts.append("co2_low")
+        if rh is not None:
+            if rh > self.THRESH_RH_HIGH:
+                alerts.append("rh_high")
+            elif rh < self.THRESH_RH_LOW:
+                alerts.append("rh_low")
+        if pwm is not None and pwm >= 255:
+            alerts.append("heater_saturated")
+
+        return alerts
+
+    def _apply_alerts(self, alerts: list[str], d: dict) -> None:
+        """Update card colours and fire pop-ups for new alerts."""
+        # Temp card
+        if "temp_high" in alerts or "temp_low" in alerts:
+            self.card_temp.set_alert("critical")
+        else:
+            self.card_temp.set_alert("normal")
+
+        # CO2 card
+        if "co2_high" in alerts:
+            self.card_co2.set_alert("critical")
+        elif "co2_low" in alerts:
+            self.card_co2.set_alert("warn")
+        else:
+            self.card_co2.set_alert("normal")
+
+        # RH card
+        if "rh_high" in alerts or "rh_low" in alerts:
+            self.card_rh.set_alert("warn")
+        else:
+            self.card_rh.set_alert("normal")
+
+        # Pop-up once per new alert
+        messages = {
+            "temp_high":         f"Temperature too high: {d.get('temp', '?'):.2f}°C (setpoint {d.get('setpoint', self._last_setpoint):.1f}°C)",
+            "temp_low":          f"Temperature too low: {d.get('temp', '?'):.2f}°C (setpoint {d.get('setpoint', self._last_setpoint):.1f}°C)",
+            "co2_high":          f"CO₂ too high: {d.get('co2', '?'):.0f} ppm",
+            "co2_low":           f"CO₂ too low: {d.get('co2', '?'):.0f} ppm",
+            "rh_high":           f"Humidity too high: {d.get('rh', '?'):.1f}%",
+            "rh_low":            f"Humidity too low: {d.get('rh', '?'):.1f}%",
+            "heater_saturated":  "Heater PWM at maximum — may not reach setpoint.",
+        }
+        for alert in alerts:
+            if not self._alert_active.get(alert):
+                self._alert_active[alert] = True
+                QMessageBox.warning(self, "Sensor Alert", messages.get(alert, alert))
+
+        # Clear resolved alerts
+        for alert in list(self._alert_active):
+            if alert not in alerts:
+                self._alert_active[alert] = False
+
+    def _append_reading(self, d: dict, alerts: list[str]) -> None:
+        reading = {
+            "timestamp":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "elapsed_s":  round(time.time() - self.t0, 1),
+            "co2":        d.get("co2"),
+            "temp":       d.get("temp"),
+            "rh":         d.get("rh"),
+            "setpoint":   d.get("setpoint", self._last_setpoint),
+            "heater_pwm": d.get("heater_pwm"),
+            "alerts":     alerts,
+        }
+        self._log_buffer.append(reading)
+        self._log_flush_count += 1
+        if self._log_flush_count >= self._log_flush_every:
+            self._flush_log()
+
+    def _flush_log(self, final: bool = False) -> None:
+        if not self._log_path or not self._log_buffer:
+            return
+        try:
+            # Read existing file if it exists, otherwise start fresh
+            if os.path.exists(self._log_path):
+                with open(self._log_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            else:
+                data = {"session_start": self._session_start, "readings": []}
+
+            data["readings"].extend(self._log_buffer)
+            if final:
+                data["session_end"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            with open(self._log_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+
+            self._log_buffer = []
+            self._log_flush_count = 0
+        except Exception as e:
+            self.conn_status.setText(f"Log write error: {e}")
 
     def _pump_queue(self) -> None:
         try:
@@ -504,6 +663,11 @@ class SensorsTab(QWidget):
 
         if co2 is not None:
             self._apply_air_status(float(co2))
+
+        alerts = self._check_thresholds(d)
+        self._apply_alerts(alerts, d)
+        if self.is_recording and self._log_path:
+            self._append_reading(d, alerts)
     
     def _on_apply_setpoint(self) -> None:
         try:
@@ -576,6 +740,8 @@ class SensorsTab(QWidget):
             
    
     def shutdown(self) -> None:
+        if self.is_recording:
+            self._flush_log(final=True)
         if self.reader is not None:
             try:
                 self.reader.stop()
