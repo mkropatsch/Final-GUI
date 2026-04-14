@@ -204,7 +204,7 @@ class SensorsTab(QWidget):
         self._last_setpoint: float = 37.0
         
         self.t0 = time.time()
-        self.is_recording = True
+        self.is_recording = False
 
         self.T_GOOD = 800
         self.T_WARN = 1500
@@ -252,7 +252,7 @@ class SensorsTab(QWidget):
 
         self.btn_refresh = QPushButton("Refresh")
         self.btn_connect = QPushButton("Connect")
-        self.btn_record = QPushButton("Stop Recording")
+        self.btn_record = QPushButton("Start Recording")
         self.btn_clear = QPushButton("Clear Graphs")
 
         self.conn_status = QLabel("Not connected")
