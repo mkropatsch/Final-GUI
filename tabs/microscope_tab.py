@@ -58,6 +58,10 @@ class MicroscopeTab(QWidget):
         self.snapshot_dir = os.path.join(os.getcwd(), "microscope_snapshots")
         os.makedirs(self.snapshot_dir, exist_ok=True)
 
+        self.recording = False
+        self.video_writer = None
+        self.recording_start_time = None
+
         self.timer = QTimer(self)
         self.timer.setInterval(33)
         self.timer.timeout.connect(self._update_frame)
@@ -67,6 +71,7 @@ class MicroscopeTab(QWidget):
         self._update_placeholder("No camera connected")
         self.btn_view.setEnabled(False)
         self.btn_snapshot.setEnabled(False)
+        self.btn_record.setEnabled(False)
 
     # -------------------------- UI --------------------------
     def _build_ui(self) -> None:
@@ -155,15 +160,21 @@ class MicroscopeTab(QWidget):
         folder_row.addWidget(self.btn_folder)
         folder_row.addWidget(self.btn_snapshot)
 
+        self.btn_record = QPushButton("Record Video")
+
         self.folder_label = QLabel(self.snapshot_dir)
         self.folder_label.setWordWrap(True)
         self.folder_label.setStyleSheet("color: #b8c4d9;")
         self.capture_status = QLabel("Ready to save snapshots")
         self.capture_status.setStyleSheet("color: #b8c4d9;")
+        self.rec_indicator = QLabel("")
+        self.rec_indicator.setStyleSheet("color: #ff4444; font-weight: bold;")
 
         capture_layout.addLayout(folder_row)
+        capture_layout.addWidget(self.btn_record)
         capture_layout.addWidget(self.folder_label)
         capture_layout.addWidget(self.capture_status)
+        capture_layout.addWidget(self.rec_indicator)
 
         detect_group = QGroupBox("Detection")
         detect_form = QFormLayout(detect_group)
@@ -240,6 +251,7 @@ class MicroscopeTab(QWidget):
         self.btn_view.clicked.connect(self._on_view_clicked)
         self.btn_folder.clicked.connect(self._choose_folder)
         self.btn_snapshot.clicked.connect(self._save_snapshot)
+        self.btn_record.clicked.connect(self._toggle_recording)
         self.sld_threshold.valueChanged.connect(
             lambda v: self.lab_threshold.setText(str(v))
         )
@@ -286,6 +298,7 @@ class MicroscopeTab(QWidget):
         self.btn_connect.setText("Disconnect")
         self.btn_view.setEnabled(True)
         self.btn_snapshot.setEnabled(True)
+        self.btn_record.setEnabled(True)
         self._update_placeholder("Camera connected - preview off")
         self.preview_info.setText("Camera ready")
 
@@ -308,6 +321,8 @@ class MicroscopeTab(QWidget):
         self.preview_info.setText("Preview running")
 
     def disconnect_camera(self) -> None:
+        if self.recording:
+            self._stop_recording()
         self.timer.stop()
         self.preview_live = False
 
@@ -327,6 +342,7 @@ class MicroscopeTab(QWidget):
         self.btn_view.setText("Start View")
         self.btn_view.setEnabled(False)
         self.btn_snapshot.setEnabled(False)
+        self.btn_record.setEnabled(False)
         self.camera_status.setText("Disconnected")
         self.camera_status.setStyleSheet("color: #ffb347; font-weight: bold;")
         self._update_placeholder("No camera connected")
@@ -356,6 +372,12 @@ class MicroscopeTab(QWidget):
         self.last_display_frame = display_bgr.copy()
         self._apply_readout(result)
         self._show_bgr_frame(display_bgr)
+
+        if self.recording and self.video_writer is not None:
+            self.video_writer.write(display_bgr)
+            elapsed = int(time.time() - self.recording_start_time)
+            mins, secs = divmod(elapsed, 60)
+            self.rec_indicator.setText(f"● REC  {mins:02d}:{secs:02d}")
 
     def _process_frame(self, frame_bgr):
         if not self.chk_detection.isChecked():
@@ -459,6 +481,69 @@ class MicroscopeTab(QWidget):
             return
         self.snapshot_dir = path
         self.folder_label.setText(self.snapshot_dir)
+
+    def _toggle_recording(self) -> None:
+        if self.recording:
+            self._stop_recording()
+        else:
+            self._start_recording()
+
+    def _start_recording(self) -> None:
+        if self.last_frame_bgr is None:
+            QMessageBox.warning(self, "Record", "Start the preview first.")
+            return
+
+        os.makedirs(self.snapshot_dir, exist_ok=True)
+        self._rec_temp_path = os.path.join(self.snapshot_dir, "_recording_temp.mp4")
+        self._rec_default_name = f"microscope_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
+
+        h, w = self.last_frame_bgr.shape[:2]
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(self._rec_temp_path, fourcc, 30.0, (w, h))
+
+        if not writer.isOpened():
+            QMessageBox.warning(self, "Record", "Could not create video file.")
+            return
+
+        self.video_writer = writer
+        self.recording = True
+        self.recording_start_time = time.time()
+        self.btn_record.setText("Stop Recording")
+        self.rec_indicator.setText("● REC  00:00")
+        self.capture_status.setText("Recording...")
+
+    def _stop_recording(self) -> None:
+        self.recording = False
+        elapsed = int(time.time() - self.recording_start_time) if self.recording_start_time else 0
+        self.recording_start_time = None
+
+        if self.video_writer is not None:
+            self.video_writer.release()
+            self.video_writer = None
+
+        self.btn_record.setText("Record Video")
+        self.rec_indicator.setText("")
+
+        # Ask user for a filename
+        default_path = os.path.join(self.snapshot_dir, self._rec_default_name)
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Recording As", default_path, "Video Files (*.mp4)"
+        )
+
+        if save_path:
+            try:
+                os.replace(self._rec_temp_path, save_path)
+                mins, secs = divmod(elapsed, 60)
+                self.capture_status.setText(f"Video saved ({mins:02d}:{secs:02d}): {os.path.basename(save_path)}")
+            except Exception as e:
+                QMessageBox.warning(self, "Record", f"Could not save file: {e}")
+        else:
+            # User cancelled — delete the temp file
+            try:
+                os.remove(self._rec_temp_path)
+            except Exception:
+                pass
+            self.capture_status.setText("Recording discarded.")
 
     def _save_snapshot(self) -> None:
         if self.last_frame_bgr is None:

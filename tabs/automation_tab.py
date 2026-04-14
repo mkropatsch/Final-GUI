@@ -144,6 +144,7 @@ class AutomationTab(QWidget):
     start_requested = pyqtSignal(dict)
     stop_requested = pyqtSignal()
     test_dispense_requested = pyqtSignal(int)
+    test_aspirate_requested = pyqtSignal(int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -264,10 +265,16 @@ class AutomationTab(QWidget):
 
         self.btn_test_dispense = QPushButton("Test Dispense")
         self.btn_test_dispense.clicked.connect(self._on_test_dispense)
+        self.btn_test_aspirate = QPushButton("Test Aspirate")
+        self.btn_test_aspirate.clicked.connect(self._on_test_aspirate)
+
+        test_btn_row = QHBoxLayout()
+        test_btn_row.addWidget(self.btn_test_dispense)
+        test_btn_row.addWidget(self.btn_test_aspirate)
 
         dispense_form.addRow("Dispense (ms)", self.in_dispense_ms)
         dispense_form.addRow("Retract (ms)", self.in_retract_ms)
-        dispense_form.addRow(self.btn_test_dispense)
+        dispense_form.addRow(test_btn_row)
 
         right_col.addWidget(dispense_group)
 
@@ -375,6 +382,11 @@ class AutomationTab(QWidget):
     def _on_test_dispense(self) -> None:
         self.test_dispense_requested.emit(
             int(self.in_dispense_ms.text().strip() or 0)
+        )
+
+    def _on_test_aspirate(self) -> None:
+        self.test_aspirate_requested.emit(
+            int(self.in_retract_ms.text().strip() or 0)
         )
 
     def set_runtime_status(

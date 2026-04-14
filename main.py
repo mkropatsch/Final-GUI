@@ -846,6 +846,7 @@ class StageGUI2(QMainWindow):
         self.automation_tab_widget.start_requested.connect(self.routine.start)
         self.automation_tab_widget.stop_requested.connect(self.routine.stop)
         self.automation_tab_widget.test_dispense_requested.connect(self._on_test_dispense)
+        self.automation_tab_widget.test_aspirate_requested.connect(self._on_test_aspirate)
 
         self.pages.addWidget(self.gantry_page)          # index 0
         self.pages.addWidget(self.sensors_tab_widget)   # index 1
@@ -1364,6 +1365,12 @@ class StageGUI2(QMainWindow):
             self.incubator.pump_forward(duration_ms)
         else:
             self._post_msg("WARNING: Incubator not connected, cannot test dispense.")
+
+    def _on_test_aspirate(self, duration_ms: int) -> None:
+        if self.incubator is not None:
+            self.incubator.pump_reverse(duration_ms)
+        else:
+            self._post_msg("WARNING: Incubator not connected, cannot test aspirate.")
    
     def _on_routine_status_changed(self, payload: dict) -> None:
         self._post_msg(
@@ -1677,7 +1684,7 @@ class StageGUI2(QMainWindow):
                 if gantry_cam_connected:
                     self._disconnect_camera()
                 if microscope_cam_connected:
-                    self.microscope_tab_widget._disconnect_camera()
+                    self.microscope_tab_widget.disconnect_camera()
             else:
                 ev.ignore()
                 return
