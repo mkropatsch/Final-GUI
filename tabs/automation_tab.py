@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt5.QtCore import Qt, QRectF, pyqtSignal
+from PyQt5.QtCore import Qt, QDateTime, QRectF, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QBrush
 from PyQt5.QtWidgets import (
     QCheckBox,
@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QSpinBox,
@@ -143,8 +144,18 @@ class AutomationTab(QWidget):
     update_requested = pyqtSignal(dict)
     start_requested = pyqtSignal(dict)
     stop_requested = pyqtSignal()
-    test_dispense_requested = pyqtSignal(int)
-    test_aspirate_requested = pyqtSignal(int)
+    # Pump 1 & 2 are bidirectional; Pump 3 & 4 are single direction
+    pump1_forward_requested = pyqtSignal(int)
+    pump1_reverse_requested = pyqtSignal(int)
+    pump1_stop_requested = pyqtSignal()
+    pump2_forward_requested = pyqtSignal(int)
+    pump2_reverse_requested = pyqtSignal(int)
+    pump2_stop_requested = pyqtSignal()
+    pump3_requested = pyqtSignal(int)
+    pump3_stop_requested = pyqtSignal()
+    pump4_requested = pyqtSignal(int)
+    pump4_stop_requested = pyqtSignal()
+    stop_all_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -181,6 +192,22 @@ class AutomationTab(QWidget):
         self.preview_info.setStyleSheet("color: #cfd8e3; font-size: 14px; font-weight: 600;")
         self.preview_info.setAlignment(Qt.AlignCenter)
         preview_layout.addWidget(self.preview_info)
+
+        msg_top = QHBoxLayout()
+        msg_top.addWidget(QLabel("Messages"))
+        msg_top.addStretch()
+        self.btn_clear_messages = QPushButton("Clear")
+        self.btn_clear_messages.setFixedWidth(80)
+        msg_top.addWidget(self.btn_clear_messages)
+
+        self.msg_box = QPlainTextEdit()
+        self.msg_box.setReadOnly(True)
+        self.msg_box.setMinimumHeight(80)
+        self.msg_box.setMaximumHeight(110)
+        self.msg_box.setStyleSheet("background-color: #0e1117; color: #c8d0dc; font-size: 12px;")
+
+        preview_layout.addLayout(msg_top)
+        preview_layout.addWidget(self.msg_box)
 
         root.addWidget(preview_group, 3)
 
@@ -251,32 +278,83 @@ class AutomationTab(QWidget):
 
         right_col.addWidget(auto_group)
         
-        dispense_group = QGroupBox("Dispense Settings")
-        dispense_group.setStyleSheet(
+        pump_group = QGroupBox("Pump Test")
+        pump_group.setStyleSheet(
             "QGroupBox::title { font-size: 16px; font-weight: bold; color: #ffffff; padding: 0 5px; }"
         )
-        dispense_form = QFormLayout(dispense_group)
-        dispense_form.setSpacing(8)
-        
-        self.in_dispense_ms = QLineEdit()
-        self.in_dispense_ms.setPlaceholderText("e.g. 200")
-        self.in_retract_ms = QLineEdit()
-        self.in_retract_ms.setPlaceholderText("e.g. 50")
+        pump_form = QFormLayout(pump_group)
+        pump_form.setSpacing(8)
 
-        self.btn_test_dispense = QPushButton("Test Dispense")
-        self.btn_test_dispense.clicked.connect(self._on_test_dispense)
-        self.btn_test_aspirate = QPushButton("Test Aspirate")
-        self.btn_test_aspirate.clicked.connect(self._on_test_aspirate)
+        stop_style = "QPushButton { background-color: #6a3030; color: white; font-weight: 600; } QPushButton:hover { background-color: #814040; }"
 
-        test_btn_row = QHBoxLayout()
-        test_btn_row.addWidget(self.btn_test_dispense)
-        test_btn_row.addWidget(self.btn_test_aspirate)
+        # Pump 1 — bidirectional
+        self.in_pump1_ms = QLineEdit("1000")
+        self.in_pump1_ms.setPlaceholderText("ms")
+        p1_row = QHBoxLayout()
+        self.btn_pump1_fwd = QPushButton("Forward")
+        self.btn_pump1_rev = QPushButton("Reverse")
+        self.btn_pump1_stop = QPushButton("Stop")
+        self.btn_pump1_stop.setStyleSheet(stop_style)
+        self.btn_pump1_fwd.clicked.connect(self._on_pump1_forward)
+        self.btn_pump1_rev.clicked.connect(self._on_pump1_reverse)
+        self.btn_pump1_stop.clicked.connect(self.pump1_stop_requested)
+        p1_row.addWidget(self.in_pump1_ms)
+        p1_row.addWidget(self.btn_pump1_fwd)
+        p1_row.addWidget(self.btn_pump1_rev)
+        p1_row.addWidget(self.btn_pump1_stop)
+        pump_form.addRow("Pump 1", p1_row)
 
-        dispense_form.addRow("Dispense (ms)", self.in_dispense_ms)
-        dispense_form.addRow("Retract (ms)", self.in_retract_ms)
-        dispense_form.addRow(test_btn_row)
+        # Pump 2 — bidirectional
+        self.in_pump2_ms = QLineEdit("1000")
+        self.in_pump2_ms.setPlaceholderText("ms")
+        p2_row = QHBoxLayout()
+        self.btn_pump2_fwd = QPushButton("Forward")
+        self.btn_pump2_rev = QPushButton("Reverse")
+        self.btn_pump2_stop = QPushButton("Stop")
+        self.btn_pump2_stop.setStyleSheet(stop_style)
+        self.btn_pump2_fwd.clicked.connect(self._on_pump2_forward)
+        self.btn_pump2_rev.clicked.connect(self._on_pump2_reverse)
+        self.btn_pump2_stop.clicked.connect(self.pump2_stop_requested)
+        p2_row.addWidget(self.in_pump2_ms)
+        p2_row.addWidget(self.btn_pump2_fwd)
+        p2_row.addWidget(self.btn_pump2_rev)
+        p2_row.addWidget(self.btn_pump2_stop)
+        pump_form.addRow("Pump 2", p2_row)
 
-        right_col.addWidget(dispense_group)
+        # Pump 3 — single direction
+        self.in_pump3_ms = QLineEdit("1000")
+        self.in_pump3_ms.setPlaceholderText("ms")
+        p3_row = QHBoxLayout()
+        self.btn_pump3_run = QPushButton("Run")
+        self.btn_pump3_stop = QPushButton("Stop")
+        self.btn_pump3_stop.setStyleSheet(stop_style)
+        self.btn_pump3_run.clicked.connect(self._on_pump3_run)
+        self.btn_pump3_stop.clicked.connect(self.pump3_stop_requested)
+        p3_row.addWidget(self.in_pump3_ms)
+        p3_row.addWidget(self.btn_pump3_run)
+        p3_row.addWidget(self.btn_pump3_stop)
+        pump_form.addRow("Pump 3", p3_row)
+
+        # Pump 4 — single direction
+        self.in_pump4_ms = QLineEdit("1000")
+        self.in_pump4_ms.setPlaceholderText("ms")
+        p4_row = QHBoxLayout()
+        self.btn_pump4_run = QPushButton("Run")
+        self.btn_pump4_stop = QPushButton("Stop")
+        self.btn_pump4_stop.setStyleSheet(stop_style)
+        self.btn_pump4_run.clicked.connect(self._on_pump4_run)
+        self.btn_pump4_stop.clicked.connect(self.pump4_stop_requested)
+        p4_row.addWidget(self.in_pump4_ms)
+        p4_row.addWidget(self.btn_pump4_run)
+        p4_row.addWidget(self.btn_pump4_stop)
+        pump_form.addRow("Pump 4", p4_row)
+
+        self.btn_stop_all = QPushButton("Stop All Pumps")
+        self.btn_stop_all.setStyleSheet(stop_style)
+        self.btn_stop_all.clicked.connect(self.stop_all_requested)
+        pump_form.addRow(self.btn_stop_all)
+
+        right_col.addWidget(pump_group)
 
 
         status_group = QGroupBox("Routine Status")
@@ -313,6 +391,8 @@ class AutomationTab(QWidget):
         right_col.addWidget(status_group)
 
         right_col.addStretch()
+
+        self.btn_clear_messages.clicked.connect(self.msg_box.clear)
 
         self.btn_plate_update.clicked.connect(self._on_update_clicked)
         self.cmb_plate.currentTextChanged.connect(self._on_plate_changed)
@@ -379,15 +459,26 @@ class AutomationTab(QWidget):
         self.lab_phase.setText("Phase: Stopped")
         self.stop_requested.emit()
         
-    def _on_test_dispense(self) -> None:
-        self.test_dispense_requested.emit(
-            int(self.in_dispense_ms.text().strip() or 0)
-        )
+    def _ms(self, field: QLineEdit) -> int:
+        return int(field.text().strip() or 0)
 
-    def _on_test_aspirate(self) -> None:
-        self.test_aspirate_requested.emit(
-            int(self.in_retract_ms.text().strip() or 0)
-        )
+    def _on_pump1_forward(self) -> None:
+        self.pump1_forward_requested.emit(self._ms(self.in_pump1_ms))
+
+    def _on_pump1_reverse(self) -> None:
+        self.pump1_reverse_requested.emit(self._ms(self.in_pump1_ms))
+
+    def _on_pump2_forward(self) -> None:
+        self.pump2_forward_requested.emit(self._ms(self.in_pump2_ms))
+
+    def _on_pump2_reverse(self) -> None:
+        self.pump2_reverse_requested.emit(self._ms(self.in_pump2_ms))
+
+    def _on_pump3_run(self) -> None:
+        self.pump3_requested.emit(self._ms(self.in_pump3_ms))
+
+    def _on_pump4_run(self) -> None:
+        self.pump4_requested.emit(self._ms(self.in_pump4_ms))
 
     def set_runtime_status(
         self,
@@ -402,6 +493,13 @@ class AutomationTab(QWidget):
         self.lab_phase.setText(f"Phase: {phase or '—'}")
         self.preview.set_highlight(highlight_row, highlight_col)
 
+    def post_message(self, text: str) -> None:
+        stamp = QDateTime.currentDateTime().toString("yyyy-MM-dd HH:mm:ss")
+        self.msg_box.appendPlainText(f"[{stamp}] {text}")
+        self.msg_box.verticalScrollBar().setValue(
+            self.msg_box.verticalScrollBar().maximum()
+        )
+
     def get_config(self) -> dict:
         return {
             "plate_type": self.cmb_plate.currentText(),
@@ -412,8 +510,6 @@ class AutomationTab(QWidget):
             "dz": self.in_dz.text().strip(),
             "wait_s": self.in_wait.text().strip(),
             "serpentine": self.chk_serpentine.isChecked(),
-            "dispense_ms": self.in_dispense_ms.text().strip(),
-            "retract_ms": self.in_retract_ms.text().strip(),
         }
 
 

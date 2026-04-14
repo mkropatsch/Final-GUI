@@ -4,13 +4,25 @@ from __future__ import annotations
 # Bidirectional serial thread for the Arduino incubator board.
 #
 # The Arduino outputs one line every ~5 seconds:
-#   CO2: 412 ppm | Temp: 36.85 C | RH: 72.34 % | Setpoint: 37.00 C | Error: 0.15 | Heater PWM: 47 | Pump: STOPPED
+#   CO2: 412 ppm | Temp: 36.85 C | RH: 72.34 % | Setpoint: 37.00 C | Heater PWM: 47
 #
-# Commands we send TO the Arduino:
-#   FWD <ms>        — run pump forward for <ms> milliseconds
-#   REV <ms>        — run pump reverse for <ms> milliseconds
-#   STOP            — stop pump immediately
-#   SETPOINT <temp> — update heater target temperature
+# Commands we send TO the Arduino (all lowercase — Arduino calls cmd.toLowerCase()):
+#   pump1 forward <ms>   — run pump 1 forward for <ms> milliseconds
+#   pump1 reverse <ms>   — run pump 1 reverse for <ms> milliseconds
+#   pump2 forward <ms>   — run pump 2 forward for <ms> milliseconds
+#   pump2 reverse <ms>   — run pump 2 reverse for <ms> milliseconds
+#   pump3 <ms>           — run pump 3 for <ms> milliseconds (one direction only)
+#   pump4 <ms>           — run pump 4 for <ms> milliseconds (one direction only)
+#   stop1                — stop pump 1
+#   stop2                — stop pump 2
+#   stop3                — stop pump 3
+#   stop4                — stop pump 4
+#   stopall              — stop all pumps
+#   setpoint <temp>      — update heater target temperature
+#
+# TODO: wire pump commands into the routine (RoutineController._dispense).
+#       Decide which pump(s) the routine should trigger at each well and
+#       whether a reverse/aspirate step is needed after dispensing.
 
 import queue
 import re
@@ -25,15 +37,13 @@ except Exception:
     HAS_SERIAL = False
 
 
-# Matches the Arduino's output line format
+# Matches the Arduino's output line format (no Error or Pump fields in new firmware)
 INCUBATOR_PATTERN = re.compile(
     r"CO2:\s*(\d+)\s*ppm"
     r"\s*\|\s*Temp:\s*([-\d\.]+)\s*C"
     r"\s*\|\s*RH:\s*([-\d\.]+)\s*%"
     r"\s*\|\s*Setpoint:\s*([-\d\.]+)\s*C"
-    r"\s*\|\s*Error:\s*([-\d\.]+)"
-    r"\s*\|\s*Heater PWM:\s*(\d+)"
-    r"\s*\|\s*Pump:\s*(\w+)",
+    r"\s*\|\s*Heater PWM:\s*(\d+)",
     re.IGNORECASE,
 )
 
@@ -58,8 +68,8 @@ class IncubatorSerial(threading.Thread):
         super().__init__(daemon=True)
         self.port = port
         self.baud = baud
-        self.q = out_queue or queue.Queue()          # inbound → GUI
-        self._cmd_queue: queue.Queue[str] = queue.Queue()  # outbound → Arduino
+        self.q = out_queue or queue.Queue()
+        self._cmd_queue: queue.Queue[str] = queue.Queue()
         self._stop_event = threading.Event()
         self.ser = None
 
@@ -74,18 +84,47 @@ class IncubatorSerial(threading.Thread):
         """Queue a command string to be sent to the Arduino."""
         self._cmd_queue.put(cmd)
 
-    # Convenience helpers so callers don't have to format strings
-    def pump_forward(self, duration_ms: int) -> None:
-        self.send_command(f"FWD {int(duration_ms)}")
+    # ---- Pump 1 (bidirectional H-bridge) ----
+    def pump1_forward(self, duration_ms: int) -> None:
+        self.send_command(f"pump1 forward {int(duration_ms)}")
 
-    def pump_reverse(self, duration_ms: int) -> None:
-        self.send_command(f"REV {int(duration_ms)}")
+    def pump1_reverse(self, duration_ms: int) -> None:
+        self.send_command(f"pump1 reverse {int(duration_ms)}")
 
-    def pump_stop(self) -> None:
-        self.send_command("STOP")
+    def stop1(self) -> None:
+        self.send_command("stop1")
 
+    # ---- Pump 2 (bidirectional H-bridge) ----
+    def pump2_forward(self, duration_ms: int) -> None:
+        self.send_command(f"pump2 forward {int(duration_ms)}")
+
+    def pump2_reverse(self, duration_ms: int) -> None:
+        self.send_command(f"pump2 reverse {int(duration_ms)}")
+
+    def stop2(self) -> None:
+        self.send_command("stop2")
+
+    # ---- Pump 3 (single direction) ----
+    def pump3_run(self, duration_ms: int) -> None:
+        self.send_command(f"pump3 {int(duration_ms)}")
+
+    def stop3(self) -> None:
+        self.send_command("stop3")
+
+    # ---- Pump 4 (single direction) ----
+    def pump4_run(self, duration_ms: int) -> None:
+        self.send_command(f"pump4 {int(duration_ms)}")
+
+    def stop4(self) -> None:
+        self.send_command("stop4")
+
+    # ---- All pumps ----
+    def stop_all(self) -> None:
+        self.send_command("stopall")
+
+    # ---- Heater ----
     def set_setpoint(self, temp: float) -> None:
-        self.send_command(f"SETPOINT {temp:.2f}")
+        self.send_command(f"setpoint {temp:.2f}")
 
     # ------------------------------------------------------------------
     # Thread run loop
@@ -94,7 +133,7 @@ class IncubatorSerial(threading.Thread):
     def run(self) -> None:
         try:
             self.ser = serial.Serial(self.port, self.baud, timeout=1)
-            time.sleep(1.2)                  # wait for Arduino reset after serial open
+            time.sleep(1.2)
             self.ser.reset_input_buffer()
         except Exception as e:
             self.q.put(("status", f"Could not open {self.port}: {e}"))
@@ -128,9 +167,7 @@ class IncubatorSerial(threading.Thread):
                             "temp":       float(match.group(2)),
                             "rh":         float(match.group(3)),
                             "setpoint":   float(match.group(4)),
-                            "error":      float(match.group(5)),
-                            "heater_pwm": int(match.group(6)),
-                            "pump_state": match.group(7).upper(),  # STOPPED / FORWARD / REVERSE
+                            "heater_pwm": int(match.group(5)),
                         },
                     ))
                 elif line:

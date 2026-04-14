@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 import queue
 import random
-import re
 import threading
 import time
 from collections import deque
@@ -71,7 +70,7 @@ class SerialReader(threading.Thread):
                 if not raw:
                     continue
                 line = raw.decode(errors="replace").strip()
-                match = PATTERN.search(line)
+                match = INCUBATOR_PATTERN.search(line)
                 if match:
                     self.q.put((
                         "data",
@@ -79,7 +78,8 @@ class SerialReader(threading.Thread):
                             "co2": float(match.group(1)),
                             "temp": float(match.group(2)),
                             "rh": float(match.group(3)),
-                            "o2": float(match.group(4)),
+                            "setpoint": float(match.group(4)),
+                            "heater_pwm": int(match.group(5)),
                         },
                     ))
                 elif line:
@@ -258,14 +258,11 @@ class SensorsTab(QWidget):
         self.btn_apply_setpoint = QPushButton("Apply")
         self.btn_apply_setpoint.clicked.connect(self._on_apply_setpoint)
         self.lab_heater_pwm = QLabel("Heater PWM: —")
-        self.lab_pump_state = QLabel("Pump: —")
         heater_layout.addWidget(QLabel("Setpoint (°C)"))
         heater_layout.addWidget(self.setpoint_input)
         heater_layout.addWidget(self.btn_apply_setpoint)
         heater_layout.addSpacing(20)
         heater_layout.addWidget(self.lab_heater_pwm)
-        heater_layout.addSpacing(20)
-        heater_layout.addWidget(self.lab_pump_state)
         heater_layout.addStretch()
         root.addWidget(heater_box)
 
@@ -410,7 +407,8 @@ class SensorsTab(QWidget):
             self.reader = IncubatorSerial(port=port, out_queue=self.q)
 
         self.reader.start()
-        self.reader.set_setpoint(self._last_setpoint)
+        if isinstance(self.reader, IncubatorSerial):
+            self.reader.set_setpoint(self._last_setpoint)
         self.incubator_connected.emit(self.reader)
         self.btn_connect.setText("Disconnect")
         self.conn_status.setText(f"Connecting to {port}…")
@@ -465,8 +463,6 @@ class SensorsTab(QWidget):
             self.card_o2.set_value(f"{o2:.2f}")
         if d.get("heater_pwm") is not None:
             self.lab_heater_pwm.setText(f"Heater PWM: {d['heater_pwm']}/255")
-        if d.get("pump_state") is not None:
-            self.lab_pump_state.setText(f"Pump: {d['pump_state']}")
         if d.get("setpoint") is not None:
             self._last_setpoint = d["setpoint"]
             
