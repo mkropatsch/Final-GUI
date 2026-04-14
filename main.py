@@ -858,6 +858,17 @@ class StageGUI2(QMainWindow):
         self.automation_tab_widget.pump4_stop_requested.connect(self._on_pump4_stop)
         self.automation_tab_widget.stop_all_requested.connect(self._on_stop_all_pumps)
 
+        # Mirror the microscope camera feed into the automation tab
+        self.microscope_tab_widget.frame_ready.connect(
+            self.automation_tab_widget.update_camera_frame
+        )
+        self.microscope_tab_widget.view_state_changed.connect(
+            self.automation_tab_widget.set_cam_view_state
+        )
+        self.automation_tab_widget.cam_view_toggle_requested.connect(
+            self.microscope_tab_widget._on_view_clicked
+        )
+
         self.pages.addWidget(self.gantry_page)          # index 0
         self.pages.addWidget(self.sensors_tab_widget)   # index 1
         self.pages.addWidget(self.microscope_tab_widget)      # index 2

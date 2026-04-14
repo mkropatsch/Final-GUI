@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import cv2
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import (
     QFileDialog,
@@ -38,13 +38,14 @@ class DetectionResult:
 class MicroscopeTab(QWidget):
     """Dedicated microscope/imaging tab.
 
-    Features in this first version:
-    - camera refresh / connect / disconnect
-    - start / stop live preview
-    - snapshot saving
-    - simple contour-based detection
-    - raw / mask / overlay display modes
-    """
+    frame_ready is emitted with a QPixmap each time a frame is rendered,
+    and with None when the camera disconnects — used to drive the
+    camera feed panel in AutomationTab."""
+
+    frame_ready = pyqtSignal(object)      # QPixmap | None
+    # Emitted whenever camera connected/view running state changes.
+    # Args: camera_connected (bool), view_running (bool)
+    view_state_changed = pyqtSignal(bool, bool)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -301,6 +302,7 @@ class MicroscopeTab(QWidget):
         self.btn_record.setEnabled(True)
         self._update_placeholder("Camera connected - preview off")
         self.preview_info.setText("Camera ready")
+        self.view_state_changed.emit(True, False)
 
     def _on_view_clicked(self) -> None:
         if not self.camera_connected or self.camera_cap is None:
@@ -313,12 +315,15 @@ class MicroscopeTab(QWidget):
             self.btn_view.setText("Start View")
             self._update_placeholder("Camera connected - preview off")
             self.preview_info.setText("Preview stopped")
+            self.frame_ready.emit(None)
+            self.view_state_changed.emit(True, False)
             return
 
         self.timer.start()
         self.preview_live = True
         self.btn_view.setText("Stop View")
         self.preview_info.setText("Preview running")
+        self.view_state_changed.emit(True, True)
 
     def disconnect_camera(self) -> None:
         if self.recording:
@@ -346,6 +351,8 @@ class MicroscopeTab(QWidget):
         self.camera_status.setText("Disconnected")
         self.camera_status.setStyleSheet("color: #ffb347; font-weight: bold;")
         self._update_placeholder("No camera connected")
+        self.frame_ready.emit(None)
+        self.view_state_changed.emit(False, False)
         self.preview_info.setText("Preview idle")
         self.lab_detect_status.setText("No detection")
         self.lab_centroid.setText("(-, -)")
@@ -364,6 +371,7 @@ class MicroscopeTab(QWidget):
             self.btn_view.setText("Start View")
             self._update_placeholder("Preview unavailable")
             self.preview_info.setText("Failed to read frame")
+            self.view_state_changed.emit(True, False)
             return
 
         self.last_frame_bgr = frame.copy()
@@ -449,6 +457,7 @@ class MicroscopeTab(QWidget):
         )
         self.preview_label.setPixmap(scaled)
         self.preview_label.setText("")
+        self.frame_ready.emit(scaled)
 
     def _update_placeholder(self, text: str) -> None:
         self.preview_label.clear()

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PyQt5.QtCore import Qt, QDateTime, QRectF, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QBrush
+from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPixmap
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -156,6 +156,7 @@ class AutomationTab(QWidget):
     pump4_requested = pyqtSignal(int)
     pump4_stop_requested = pyqtSignal()
     stop_all_requested = pyqtSignal()
+    cam_view_toggle_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -167,7 +168,10 @@ class AutomationTab(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
 
-        # ---------------- left: preview ----------------
+        # ---------------- left column: preview + camera feed + messages ----------------
+        left_col = QVBoxLayout()
+        left_col.setSpacing(10)
+
         preview_group = QGroupBox("Well Plate Preview")
         preview_group.setStyleSheet(
             """
@@ -193,23 +197,34 @@ class AutomationTab(QWidget):
         self.preview_info.setAlignment(Qt.AlignCenter)
         preview_layout.addWidget(self.preview_info)
 
-        msg_top = QHBoxLayout()
-        msg_top.addWidget(QLabel("Messages"))
-        msg_top.addStretch()
-        self.btn_clear_messages = QPushButton("Clear")
-        self.btn_clear_messages.setFixedWidth(80)
-        msg_top.addWidget(self.btn_clear_messages)
+        left_col.addWidget(preview_group, 2)
 
-        self.msg_box = QPlainTextEdit()
-        self.msg_box.setReadOnly(True)
-        self.msg_box.setMinimumHeight(80)
-        self.msg_box.setMaximumHeight(110)
-        self.msg_box.setStyleSheet("background-color: #0e1117; color: #c8d0dc; font-size: 12px;")
+        # Camera feed panel
+        cam_feed_group = QGroupBox("Camera Feed")
+        cam_feed_group.setStyleSheet(
+            "QGroupBox::title { font-size: 16px; font-weight: bold; color: #ffffff; padding: 0 5px; }"
+        )
+        cam_feed_layout = QVBoxLayout(cam_feed_group)
+        cam_feed_layout.setContentsMargins(8, 8, 8, 8)
 
-        preview_layout.addLayout(msg_top)
-        preview_layout.addWidget(self.msg_box)
+        self.cam_feed_label = QLabel("No camera connected")
+        self.cam_feed_label.setAlignment(Qt.AlignCenter)
+        self.cam_feed_label.setMinimumHeight(160)
+        self.cam_feed_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.cam_feed_label.setStyleSheet(
+            "QLabel { background-color: #0c0c0c; border: 1px solid #404040;"
+            " border-radius: 6px; color: #c8cfdb; font-size: 14px; }"
+        )
+        cam_feed_layout.addWidget(self.cam_feed_label)
 
-        root.addWidget(preview_group, 2)
+        self.btn_cam_view = QPushButton("Start View")
+        self.btn_cam_view.setEnabled(False)
+        self.btn_cam_view.clicked.connect(self.cam_view_toggle_requested)
+        cam_feed_layout.addWidget(self.btn_cam_view)
+
+        left_col.addWidget(cam_feed_group, 1)
+
+        root.addLayout(left_col, 2)
 
         # ---------------- right: controls ----------------
         right_col = QVBoxLayout()
@@ -390,7 +405,22 @@ class AutomationTab(QWidget):
 
         right_col.addWidget(status_group)
 
-        right_col.addStretch()
+        # Messages panel at the bottom of the right column
+        msg_top = QHBoxLayout()
+        msg_top.addWidget(QLabel("Messages"))
+        msg_top.addStretch()
+        self.btn_clear_messages = QPushButton("Clear")
+        self.btn_clear_messages.setFixedWidth(80)
+        msg_top.addWidget(self.btn_clear_messages)
+
+        self.msg_box = QPlainTextEdit()
+        self.msg_box.setReadOnly(True)
+        self.msg_box.setMinimumHeight(80)
+        self.msg_box.setMaximumHeight(130)
+        self.msg_box.setStyleSheet("background-color: #0e1117; color: #c8d0dc; font-size: 12px;")
+
+        right_col.addLayout(msg_top)
+        right_col.addWidget(self.msg_box)
 
         self.btn_clear_messages.clicked.connect(self.msg_box.clear)
 
@@ -492,6 +522,30 @@ class AutomationTab(QWidget):
         self.lab_current.setText(f"Current well: {current_well or '—'}")
         self.lab_phase.setText(f"Phase: {phase or '—'}")
         self.preview.set_highlight(highlight_row, highlight_col)
+
+    def set_cam_view_state(self, camera_connected: bool, view_running: bool) -> None:
+        """Update the Start/Stop View button to reflect microscope tab state."""
+        self.btn_cam_view.setEnabled(camera_connected)
+        self.btn_cam_view.setText("Stop View" if view_running else "Start View")
+        self._cam_connected = camera_connected
+
+    def update_camera_frame(self, pixmap) -> None:
+        """Receive a QPixmap from MicroscopeTab and show it in the feed label.
+        Pass None to reset to the placeholder text."""
+        if pixmap is None:
+            self.cam_feed_label.clear()
+            connected = getattr(self, "_cam_connected", False)
+            self.cam_feed_label.setText(
+                "Preview stopped" if connected else "No camera connected"
+            )
+            return
+        scaled = pixmap.scaled(
+            self.cam_feed_label.size(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation,
+        )
+        self.cam_feed_label.setPixmap(scaled)
+        self.cam_feed_label.setText("")
 
     def post_message(self, text: str) -> None:
         stamp = QDateTime.currentDateTime().toString("yyyy-MM-dd HH:mm:ss")
