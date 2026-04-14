@@ -210,11 +210,21 @@ class SensorsTab(QWidget):
         self.T_WARN = 1500
 
         # Thresholds for alerts
-        self.THRESH_TEMP_DELTA  = 2.0    # °C above/below setpoint
-        self.THRESH_CO2_HIGH    = 2000   # ppm
-        self.THRESH_CO2_LOW     = 300    # ppm
-        self.THRESH_RH_HIGH     = 90.0   # %
-        self.THRESH_RH_LOW      = 20.0   # %
+        self.THRESH_TEMP_LOW          = 36.5   # °C — lower bound of safe range
+        self.THRESH_TEMP_HIGH         = 37.5   # °C — upper bound of safe range
+        self.THRESH_TEMP_CRITICAL     = 40.0   # °C — absolute critical (popup)
+        self.THRESH_TEMP_TREND_N      = 6      # readings needed for trend check
+        self.THRESH_TEMP_TREND_RISE   = 0.15   # °C rise across trend window to flag
+
+        # CO₂ — incubator target: 5% = 50,000 ppm (spec: 5% ± 0.2%)
+        self.THRESH_CO2_LOW           = 48000  # ppm (4.8 %)
+        self.THRESH_CO2_HIGH          = 52000  # ppm (5.2 %)
+
+        # Humidity — incubator target: >90 % RH
+        self.THRESH_RH_MIN            = 90.0   # % — warn if below this
+
+        # Rolling temperature history for trend detection (independent of recording)
+        self._temp_history: deque = deque(maxlen=12)
 
         # JSON logging
         self._log_dir = os.path.join(os.getcwd(), "sensor_logs")
@@ -254,6 +264,8 @@ class SensorsTab(QWidget):
         self.btn_connect = QPushButton("Connect")
         self.btn_record = QPushButton("Start Recording")
         self.btn_clear = QPushButton("Clear Graphs")
+        # TODO: delete this button — for demo only
+        self.btn_test_alert = QPushButton("⚠ Test Alert")
 
         self.conn_status = QLabel("Not connected")
         self.conn_status.setMinimumWidth(240)
@@ -265,6 +277,7 @@ class SensorsTab(QWidget):
         conn_layout.addWidget(self.btn_connect)
         conn_layout.addWidget(self.btn_record)
         conn_layout.addWidget(self.btn_clear)
+        conn_layout.addWidget(self.btn_test_alert)
         conn_layout.addSpacing(12)
         conn_layout.addWidget(self.conn_status)
         conn_layout.addStretch()
@@ -360,6 +373,7 @@ class SensorsTab(QWidget):
         self.btn_connect.clicked.connect(self.toggle_connect)
         self.btn_record.clicked.connect(self.toggle_recording)
         self.btn_clear.clicked.connect(self._clear_graphs)
+        self.btn_test_alert.clicked.connect(self._demo_alert)  # TODO: delete
 
         self.setStyleSheet(
             """
@@ -480,19 +494,31 @@ class SensorsTab(QWidget):
         self._log_flush_count = 0
         self._alert_active = {}
 
+    def _is_temp_rising(self) -> bool:
+        """Return True if the temperature history shows a sustained upward trend."""
+        n = self.THRESH_TEMP_TREND_N
+        if len(self._temp_history) < n:
+            return False
+        recent = list(self._temp_history)[-n:]
+        half = n // 2
+        avg_early = sum(recent[:half]) / half
+        avg_late  = sum(recent[half:]) / (n - half)
+        return (avg_late - avg_early) >= self.THRESH_TEMP_TREND_RISE
+
     def _check_thresholds(self, d: dict) -> list[str]:
         alerts = []
         temp = d.get("temp")
         co2 = d.get("co2")
         rh = d.get("rh")
-        setpoint = d.get("setpoint", self._last_setpoint)
         pwm = d.get("heater_pwm")
 
         if temp is not None:
-            if temp > setpoint + self.THRESH_TEMP_DELTA:
-                alerts.append("temp_high")
-            elif temp < setpoint - self.THRESH_TEMP_DELTA:
-                alerts.append("temp_low")
+            if temp >= self.THRESH_TEMP_CRITICAL:
+                alerts.append("temp_critical")
+            elif temp > self.THRESH_TEMP_HIGH or temp < self.THRESH_TEMP_LOW:
+                alerts.append("temp_out_of_range")
+                if self._is_temp_rising():
+                    alerts.append("temp_rising_trend")
         if co2 is not None:
             if co2 > self.THRESH_CO2_HIGH:
                 alerts.append("co2_high")
@@ -510,9 +536,14 @@ class SensorsTab(QWidget):
 
     def _apply_alerts(self, alerts: list[str], d: dict) -> None:
         """Update card colours and fire pop-ups for new alerts."""
-        # Temp card
-        if "temp_high" in alerts or "temp_low" in alerts:
+        temp = d.get("temp", "?")
+        temp_str = f"{temp:.2f}°C" if isinstance(temp, float) else str(temp)
+
+        # Temp card — critical (red) only at ≥40°C; yellow for out-of-range blips
+        if "temp_critical" in alerts:
             self.card_temp.set_alert("critical")
+        elif "temp_out_of_range" in alerts:
+            self.card_temp.set_alert("warn")
         else:
             self.card_temp.set_alert("normal")
 
@@ -530,20 +561,37 @@ class SensorsTab(QWidget):
         else:
             self.card_rh.set_alert("normal")
 
-        # Pop-up once per new alert
-        messages = {
-            "temp_high":         f"Temperature too high: {d.get('temp', '?'):.2f}°C (setpoint {d.get('setpoint', self._last_setpoint):.1f}°C)",
-            "temp_low":          f"Temperature too low: {d.get('temp', '?'):.2f}°C (setpoint {d.get('setpoint', self._last_setpoint):.1f}°C)",
-            "co2_high":          f"CO₂ too high: {d.get('co2', '?'):.0f} ppm",
-            "co2_low":           f"CO₂ too low: {d.get('co2', '?'):.0f} ppm",
-            "rh_high":           f"Humidity too high: {d.get('rh', '?'):.1f}%",
-            "rh_low":            f"Humidity too low: {d.get('rh', '?'):.1f}%",
-            "heater_saturated":  "Heater PWM at maximum — may not reach setpoint.",
+        # Pop-ups — only for events worth interrupting the user
+        # temp_out_of_range: card change only, no popup (could be a blip)
+        # temp_rising_trend: one popup warning that temp is climbing
+        # temp_critical:     one popup that temp has reached dangerous level
+        popup_alerts = {
+            "temp_critical":      (QMessageBox.critical,
+                                   f"Temperature critical: {temp_str}\n"
+                                   f"Safe range is {self.THRESH_TEMP_LOW}–{self.THRESH_TEMP_HIGH}°C. "
+                                   f"Reached {self.THRESH_TEMP_CRITICAL}°C threshold."),
+            "temp_rising_trend":  (QMessageBox.warning,
+                                   f"Temperature trending upward: {temp_str}\n"
+                                   f"Readings have been consistently rising outside the desired range "
+                                   f"({self.THRESH_TEMP_LOW}–{self.THRESH_TEMP_HIGH}°C)."),
+            "co2_high":           (QMessageBox.warning,
+                                   f"CO₂ too high: {d.get('co2', '?'):.0f} ppm"),
+            "co2_low":            (QMessageBox.warning,
+                                   f"CO₂ too low: {d.get('co2', '?'):.0f} ppm"),
+            "rh_high":            (QMessageBox.warning,
+                                   f"Humidity too high: {d.get('rh', '?'):.1f}%"),
+            "rh_low":             (QMessageBox.warning,
+                                   f"Humidity too low: {d.get('rh', '?'):.1f}%"),
+            "heater_saturated":   (QMessageBox.warning,
+                                   "Heater PWM at maximum — may not reach setpoint."),
         }
         for alert in alerts:
+            if alert not in popup_alerts:
+                continue   # temp_out_of_range: visual only, no popup
             if not self._alert_active.get(alert):
                 self._alert_active[alert] = True
-                QMessageBox.warning(self, "Sensor Alert", messages.get(alert, alert))
+                fn, msg = popup_alerts[alert]
+                fn(self, "Sensor Alert", msg)
 
         # Clear resolved alerts
         for alert in list(self._alert_active):
@@ -616,6 +664,7 @@ class SensorsTab(QWidget):
             self.card_co2.set_value(f"{co2:.0f}")
         if temp is not None:
             self.card_temp.set_value(f"{temp:.2f}")
+            self._temp_history.append(temp)   # always track for trend detection
         if rh is not None:
             self.card_rh.set_value(f"{rh:.1f}")
         if o2 is not None:
@@ -739,6 +788,14 @@ class SensorsTab(QWidget):
             
             
    
+    def _demo_alert(self) -> None:  # TODO: delete
+        QMessageBox.warning(
+            self, "Sensor Alert",
+            f"Temperature trending upward: 38.42°C\n"
+            f"Readings have been consistently rising outside the desired range "
+            f"({self.THRESH_TEMP_LOW}–{self.THRESH_TEMP_HIGH}°C)."
+        )
+
     def shutdown(self) -> None:
         if self.is_recording:
             self._flush_log(final=True)

@@ -1,0 +1,30 @@
+{
+  "session_start": "2026-04-13 20:11:40",
+  "readings": [
+    {
+      "timestamp": "2026-04-13 20:11:41",
+      "elapsed_s": 42.3,
+      "co2": 624.4009896526528,
+      "temp": 23.25047117448588,
+      "rh": 38.74408162961085,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range"
+      ]
+    },
+    {
+      "timestamp": "2026-04-13 20:11:42",
+      "elapsed_s": 43.3,
+      "co2": 620.3847140225481,
+      "temp": 23.292864471427666,
+      "rh": 38.80922321691203,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range"
+      ]
+    }
+  ],
+  "session_end": "2026-04-13 20:11:43"
+}
