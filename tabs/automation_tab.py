@@ -45,7 +45,7 @@ class WellPlatePreview(QWidget):
         self.rows = 4
         self.cols = 6
         self.highlight_index: tuple[int, int] | None = None
-        self.setMinimumSize(520, 420)
+        self.setMinimumSize(380, 300)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def set_plate_layout(self, rows: int, cols: int) -> None:
@@ -209,7 +209,7 @@ class AutomationTab(QWidget):
         preview_layout.addLayout(msg_top)
         preview_layout.addWidget(self.msg_box)
 
-        root.addWidget(preview_group, 3)
+        root.addWidget(preview_group, 2)
 
         # ---------------- right: controls ----------------
         right_col = QVBoxLayout()
