@@ -319,6 +319,44 @@ class SensorsTab(QWidget):
         heater_layout.addStretch()
         root.addWidget(heater_box)
 
+        # Target ranges panel
+        ranges_box = QGroupBox("Target Ranges")
+        ranges_layout = QGridLayout(ranges_box)
+        ranges_layout.setContentsMargins(16, 12, 16, 12)
+        ranges_layout.setHorizontalSpacing(32)
+        ranges_layout.setVerticalSpacing(10)
+
+        hdr_style = "color: #8a9bb0; font-size: 13px; font-weight: 600;"
+        for col, hdr in enumerate(["Parameter", "Target", "Current", "Status"]):
+            lbl = QLabel(hdr)
+            lbl.setStyleSheet(hdr_style)
+            ranges_layout.addWidget(lbl, 0, col)
+
+        def _make_row(row, name):
+            name_lbl    = QLabel(name)
+            target_lbl  = QLabel("—")
+            current_lbl = QLabel("—")
+            status_lbl  = QLabel("●")
+            name_lbl.setStyleSheet("color: #d8e2ee; font-size: 15px; font-weight: 600;")
+            for lbl in (target_lbl, current_lbl):
+                lbl.setStyleSheet("color: #d8e2ee; font-size: 15px;")
+            status_lbl.setStyleSheet("color: #555e6b; font-size: 22px;")
+            ranges_layout.addWidget(name_lbl,    row, 0)
+            ranges_layout.addWidget(target_lbl,  row, 1)
+            ranges_layout.addWidget(current_lbl, row, 2)
+            ranges_layout.addWidget(status_lbl,  row, 3)
+            return target_lbl, current_lbl, status_lbl
+
+        self._rng_temp_target,   self._rng_temp_current,   self._rng_temp_status   = _make_row(1, "Temperature")
+        self._rng_co2_target,    self._rng_co2_current,    self._rng_co2_status    = _make_row(2, "CO₂")
+        self._rng_rh_target,     self._rng_rh_current,     self._rng_rh_status     = _make_row(3, "Humidity")
+
+        self._rng_temp_target.setText("36.5 – 37.5 °C")
+        self._rng_co2_target.setText("4.8 – 5.2 %  (48k – 52k ppm)")
+        self._rng_rh_target.setText("> 90 % RH")
+
+        root.addWidget(ranges_box)
+
         self.air_status = QLabel("Status: —")
         self.air_status.setStyleSheet("font-size: 16px; font-weight: 700; color: #d8e2ee; padding: 2px 4px;")
         root.addWidget(self.air_status)
@@ -340,7 +378,7 @@ class SensorsTab(QWidget):
         plots_layout = QVBoxLayout(plots_box)
 
         if HAS_MPL:
-            self.fig = Figure(figsize=(8.5, 5.2), dpi=100, facecolor="#122033")
+            self.fig = Figure(figsize=(8.5, 3.8), dpi=100, facecolor="#122033")
             self.ax_co2 = self.fig.add_subplot(221)
             self.ax_temp = self.fig.add_subplot(222)
             self.ax_rh = self.fig.add_subplot(223)
@@ -525,9 +563,8 @@ class SensorsTab(QWidget):
             elif co2 < self.THRESH_CO2_LOW:
                 alerts.append("co2_low")
         if rh is not None:
-            if rh > self.THRESH_RH_HIGH:
-                alerts.append("rh_high")
-            elif rh < self.THRESH_RH_LOW:
+            # Incubator spec: RH must be >90 %; warn when it drops below
+            if rh < self.THRESH_RH_MIN:
                 alerts.append("rh_low")
         if pwm is not None and pwm >= 255:
             alerts.append("heater_saturated")
@@ -547,16 +584,14 @@ class SensorsTab(QWidget):
         else:
             self.card_temp.set_alert("normal")
 
-        # CO2 card
-        if "co2_high" in alerts:
-            self.card_co2.set_alert("critical")
-        elif "co2_low" in alerts:
+        # CO₂ card — both out-of-range directions are warn (spec: 4.8–5.2 %)
+        if "co2_high" in alerts or "co2_low" in alerts:
             self.card_co2.set_alert("warn")
         else:
             self.card_co2.set_alert("normal")
 
-        # RH card
-        if "rh_high" in alerts or "rh_low" in alerts:
+        # RH card — spec: >90 %; warn when below
+        if "rh_low" in alerts:
             self.card_rh.set_alert("warn")
         else:
             self.card_rh.set_alert("normal")
@@ -575,13 +610,18 @@ class SensorsTab(QWidget):
                                    f"Readings have been consistently rising outside the desired range "
                                    f"({self.THRESH_TEMP_LOW}–{self.THRESH_TEMP_HIGH}°C)."),
             "co2_high":           (QMessageBox.warning,
-                                   f"CO₂ too high: {d.get('co2', '?'):.0f} ppm"),
+                                   f"CO₂ too high: {d.get('co2', 0):.0f} ppm "
+                                   f"({d.get('co2', 0)/10000:.2f}%)\n"
+                                   f"Target range: {self.THRESH_CO2_LOW//1000}–"
+                                   f"{self.THRESH_CO2_HIGH//1000}k ppm (4.8–5.2%)"),
             "co2_low":            (QMessageBox.warning,
-                                   f"CO₂ too low: {d.get('co2', '?'):.0f} ppm"),
-            "rh_high":            (QMessageBox.warning,
-                                   f"Humidity too high: {d.get('rh', '?'):.1f}%"),
+                                   f"CO₂ too low: {d.get('co2', 0):.0f} ppm "
+                                   f"({d.get('co2', 0)/10000:.2f}%)\n"
+                                   f"Target range: {self.THRESH_CO2_LOW//1000}–"
+                                   f"{self.THRESH_CO2_HIGH//1000}k ppm (4.8–5.2%)"),
             "rh_low":             (QMessageBox.warning,
-                                   f"Humidity too low: {d.get('rh', '?'):.1f}%"),
+                                   f"Humidity too low: {d.get('rh', '?'):.1f}%\n"
+                                   f"Incubator requires >90% RH."),
             "heater_saturated":   (QMessageBox.warning,
                                    "Heater PWM at maximum — may not reach setpoint."),
         }
@@ -715,6 +755,7 @@ class SensorsTab(QWidget):
 
         alerts = self._check_thresholds(d)
         self._apply_alerts(alerts, d)
+        self._update_ranges_display(d, alerts)
         if self.is_recording and self._log_path:
             self._append_reading(d, alerts)
     
@@ -740,18 +781,20 @@ class SensorsTab(QWidget):
         ax.set_ylim(ymin - pad, ymax + pad)
 
     def _apply_air_status(self, co2: float) -> None:
-        if co2 < self.T_GOOD:
-            self.air_status.setText("Status: Fresh air")
+        """Show incubator CO₂ status (target 5% = 50,000 ppm, ±0.2%)."""
+        pct = co2 / 10000.0
+        if self.THRESH_CO2_LOW <= co2 <= self.THRESH_CO2_HIGH:
+            self.air_status.setText(f"CO₂ Status: In range ({pct:.2f}%)")
             self.air_status.setStyleSheet("font-size: 16px; font-weight: 700; color: #88e06b; padding: 2px 4px;")
-            self.tip_label.setText("Air looks good right now.")
-        elif co2 < self.T_WARN:
-            self.air_status.setText("Status: Getting stuffy")
+            self.tip_label.setText("CO₂ is within the 4.8–5.2% target range.")
+        elif co2 < self.THRESH_CO2_LOW:
+            self.air_status.setText(f"CO₂ Status: Low ({pct:.2f}%)")
             self.air_status.setStyleSheet("font-size: 16px; font-weight: 700; color: #ffcb6b; padding: 2px 4px;")
-            self.tip_label.setText("Consider opening a window or increasing ventilation.")
+            self.tip_label.setText("CO₂ below 4.8% — check supply and flow rate.")
         else:
-            self.air_status.setText("Status: High CO₂ — ventilate")
-            self.air_status.setStyleSheet("font-size: 16px; font-weight: 700; color: #ff7b72; padding: 2px 4px;")
-            self.tip_label.setText("Open doors/windows or increase airflow to bring CO₂ down.")
+            self.air_status.setText(f"CO₂ Status: High ({pct:.2f}%)")
+            self.air_status.setStyleSheet("font-size: 16px; font-weight: 700; color: #ffcb6b; padding: 2px 4px;")
+            self.tip_label.setText("CO₂ above 5.2% — check regulator and flow rate.")
 
    
     def _clear_graphs(self) -> None:
@@ -788,6 +831,52 @@ class SensorsTab(QWidget):
             
             
    
+    def _update_ranges_display(self, d: dict, alerts: list[str]) -> None:
+        """Refresh the Target Ranges panel current-value and status columns."""
+        IN  = "color: #88e06b; font-size: 22px;"
+        OUT = "color: #ffcb6b; font-size: 22px;"
+        ERR = "color: #ff5555; font-size: 22px;"
+        NA  = "color: #555e6b; font-size: 22px;"
+
+        temp = d.get("temp")
+        co2  = d.get("co2")
+        rh   = d.get("rh")
+
+        # Temperature
+        if temp is not None:
+            self._rng_temp_current.setText(f"{temp:.2f} °C")
+            if "temp_critical" in alerts:
+                self._rng_temp_status.setStyleSheet(ERR)
+            elif "temp_out_of_range" in alerts:
+                self._rng_temp_status.setStyleSheet(OUT)
+            else:
+                self._rng_temp_status.setStyleSheet(IN)
+        else:
+            self._rng_temp_current.setText("—")
+            self._rng_temp_status.setStyleSheet(NA)
+
+        # CO₂
+        if co2 is not None:
+            self._rng_co2_current.setText(f"{co2:.0f} ppm  ({co2/10000:.2f}%)")
+            if "co2_high" in alerts or "co2_low" in alerts:
+                self._rng_co2_status.setStyleSheet(OUT)
+            else:
+                self._rng_co2_status.setStyleSheet(IN)
+        else:
+            self._rng_co2_current.setText("—")
+            self._rng_co2_status.setStyleSheet(NA)
+
+        # Humidity
+        if rh is not None:
+            self._rng_rh_current.setText(f"{rh:.1f} %")
+            if "rh_low" in alerts:
+                self._rng_rh_status.setStyleSheet(OUT)
+            else:
+                self._rng_rh_status.setStyleSheet(IN)
+        else:
+            self._rng_rh_current.setText("—")
+            self._rng_rh_status.setStyleSheet(NA)
+
     def _demo_alert(self) -> None:  # TODO: delete
         QMessageBox.warning(
             self, "Sensor Alert",
