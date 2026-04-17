@@ -774,5 +774,17 @@ class GantrySystem:  # basically the manager
             "feed": self.feed,
         })
 
+    def _mark_disconnected(self, ch: MotionChannel, e: Exception) -> None:
+        """Mark a channel as disconnected and notify the GUI."""
+        ch.connected = False
+        ch.board = None
+        ch.dx = ch.dy = ch.dz = ch.de = 0.0
+        self.q_to_gui.put({
+            "type": "disconnected",
+            "channel": ch.name,
+            "port": ch.port or "unknown",
+            "reason": str(e),
+        })
+
     def _send_message(self, level: str, text: str):
         self.q_to_gui.put({"type": "message", "level": level, "text": text})

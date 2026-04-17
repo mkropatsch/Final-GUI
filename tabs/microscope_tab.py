@@ -7,6 +7,15 @@ from typing import Optional, Tuple
 
 import cv2
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+
+try:
+    import sys as _sys
+    _sys.path.append(r'C:\Users\macke\Desktop\Project Code\camera_light_test')
+    from DNX64 import DNX64 as _DNX64Class
+    _DNX64_DLL = r'C:\Users\macke\Desktop\Project Code\camera_light_test\DNX64.dll'
+except Exception:
+    _DNX64Class = None
+    _DNX64_DLL = None
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import (
     QFileDialog,
@@ -303,6 +312,14 @@ class MicroscopeTab(QWidget):
         self._update_placeholder("Camera connected - preview off")
         self.preview_info.setText("Camera ready")
         self.view_state_changed.emit(True, False)
+
+        if _DNX64Class is not None:
+            try:
+                dnx = _DNX64Class(_DNX64_DLL)
+                dnx.SetVideoDeviceIndex(cam_index)
+                dnx.SetLEDState(0, 0)
+            except Exception:
+                pass
 
     def _on_view_clicked(self) -> None:
         if not self.camera_connected or self.camera_cap is None:
