@@ -164,18 +164,20 @@ class StageGUI2(QMainWindow):
         self.tabs.setCurrentIndex(0)
         
         self.btn_open_guide =  QPushButton("System Setup & Guided Tour")
-        self.btn_open_guide.setFixedHeight(28)
+        self.btn_open_guide.setFixedHeight(36)
         self.btn_open_guide.setStyleSheet("""
             QPushButton {
                 background-color: #2a2f3a;
                 color: #d0d7e2;
-                border: 1px solid #444a57;
-                border-radius: 4px;
-                padding: 4px 10px;
+                border: 2px solid #4fc3f7;
+                border-radius: 6px;
+                padding: 5px 12px;
                 font-weight: 600;
+                font-size: 16px;
             }
             QPushButton:hover {
                 background-color: #353b48;
+                border: 2px solid #6fd6ff
             }
         """)
         

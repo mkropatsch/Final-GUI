@@ -24,20 +24,14 @@ class GuideWindow(QDialog):
             }
 
             QLabel#TitleLabel {
-                color: #f2f5f9;
+                color: #ffffff;
                 font-size: 26px;
-                font-weight: 700;
+                font-weight: 800;
             }
 
             QLabel#SubtitleLabel {
-                color: #aebed2;
-                font-size: 14.5px;
-            }
-
-            QFrame#HeaderCard {
-                background-color: #15263a;
-                border: 1px solid #2f4763;
-                border-radius: 12px;
+                color: #c7d7ea;
+                font-size: 15px;
             }
 
             QFrame#SectionCard {
@@ -106,10 +100,30 @@ class GuideWindow(QDialog):
 
         # ---------------- header card ----------------
         header = QFrame()
-        header.setObjectName("HeaderCard")
+        header.setStyleSheet("""
+            QFrame {
+                background-color: #1a2d44;
+                border: 2px solid #4fc3f7;
+                border-radius: 12px;
+            }
+        """)
+
         header_layout = QVBoxLayout(header)
         header_layout.setContentsMargins(18, 16, 18, 16)
         header_layout.setSpacing(6)
+
+        badge = QLabel("HELP")
+        badge.setStyleSheet("""
+            QLabel {
+                background-color: #2f6ea3;
+                color: white;
+                border-radius: 8px;
+                padding: 3px 10px;
+                font-size: 11px;
+                font-weight: 700;
+                max-width: 50px;
+            }
+        """)
 
         title = QLabel("System Setup & Guided Tour")
         title.setObjectName("TitleLabel")
@@ -118,6 +132,7 @@ class GuideWindow(QDialog):
         subtitle.setObjectName("SubtitleLabel")
         subtitle.setWordWrap(True)
 
+        header_layout.addWidget(badge, alignment=Qt.AlignLeft)
         header_layout.addWidget(title)
         header_layout.addWidget(subtitle)
 
@@ -129,10 +144,9 @@ class GuideWindow(QDialog):
             "2. Choose serial ports if using hardware.<br>"
             "3. Click <b>Connect</b> to initialize the system.<br>"
             "4. Select the motion target (<b>Needle</b>, <b>Camera</b>, or <b>Both</b>).<br>"
-            "5. Use manual jog controls to verify movement and make small adjustments. <br>"
-            "6. Move to your starting position (top left middle of well) and click <b>Set Home</b>.<br>"
+            "5. Use manual jog controls to verify movement and make small adjustments.<br>"
+            "6. Move to your starting position and click <b>Set Home</b>.<br>"
             "7. Only start routines after home has been set.<br><br>"
-            
             "<b>Tip:</b> If movement is not enabled, check that the board is properly connected."
         )
         content_layout.addWidget(self._make_section_card("System Setup", setup_body))
@@ -143,9 +157,8 @@ class GuideWindow(QDialog):
             "<b>Sensors:</b> Monitor environmental and incubator data.<br>"
             "<b>Microscope:</b> Capture images, record video, and run detection.<br>"
             "<b>Automation:</b> Configure well plates, calibration, and routines.<br><br>"
-            
             "<b>Typical workflow:</b><br>"
-            "Gantry --> Set Home --> Sensors --> Connect sensors --> Microscope (optional) --> Automation"
+            "Gantry → Set Home → Sensors → Connect sensors → Microscope (optional) → Automation"
         )
         content_layout.addWidget(self._make_section_card("Tab Overview", overview_body))
 
@@ -153,7 +166,11 @@ class GuideWindow(QDialog):
         notes_body = (
             "• <b>Machine Home</b> moves the system to its physical home using endstops.<br>"
             "• <b>Set Home</b> defines the current working origin in software.<br>"
-            "• Use <b>Emergency Stop</b> if motion must be halted immediately."
+            "• Use <b>Emergency Stop</b> if motion must be halted immediately.<br><br>"
+            "<b>Common issues:</b><br>"
+            "• No movement → system may not be connected<br>"
+            "• Wrong position → home may not be set correctly<br>"
+            "• Blank camera view → preview may not be started"
         )
         content_layout.addWidget(self._make_section_card("Notes", notes_body))
 
@@ -200,6 +217,6 @@ class GuideWindow(QDialog):
         layout.addWidget(body)
 
         return card
-    
+
     def closeEvent(self, event):
         event.accept()
