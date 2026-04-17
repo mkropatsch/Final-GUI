@@ -13,7 +13,7 @@ from typing import Dict, Optional
 import cv2
 import pygame
 
-from PyQt5.QtCore import Qt, QTimer, QDateTime
+from PyQt5.QtCore import Qt, QTimer, QDateTime, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
@@ -94,6 +94,8 @@ def controller_process_main(q_from_gui_to_ctrl, q_to_gantry,
 
 # ---------------------------------- GUI --------------------------------------
 class StageGUI2(QMainWindow):
+    raw_frame_ready = pyqtSignal(object)   # emits raw BGR numpy frame each capture tick
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Auto in-vitro v3")
@@ -866,8 +868,11 @@ class StageGUI2(QMainWindow):
             self.automation_tab_widget.set_cam_view_state
         )
         self.automation_tab_widget.cam_view_toggle_requested.connect(
-            self.microscope_tab_widget._on_view_clicked
+            self._on_camera_view_clicked
         )
+
+        # Push raw BGR frames to MicroscopeTab for display and recording
+        self.raw_frame_ready.connect(self.microscope_tab_widget.receive_frame)
 
         self.pages.addWidget(self.gantry_page)          # index 0
         self.pages.addWidget(self.sensors_tab_widget)   # index 1
@@ -1219,6 +1224,9 @@ class StageGUI2(QMainWindow):
         self._update_camera_placeholder("")
         self._post_msg(f"Camera {cam_index} connected.")
 
+        if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
+            self.microscope_tab_widget.on_camera_connected(cam_index)
+
         if _DNX64Class is not None:
             try:
                 dnx = _DNX64Class(_DNX64_DLL)
@@ -1239,13 +1247,17 @@ class StageGUI2(QMainWindow):
             self.lab_camera_status.setText("Preview stopped")
             self._update_camera_placeholder("Camera connected - preview off")
             self._post_msg("Camera preview stopped.")
+            if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
+                self.microscope_tab_widget.on_view_stopped()
             return
-        
+
         self.camera_timer.start()
         self.camera_preview_live = True
         self.btn_camera_view.setText("Stop View")
         self.lab_camera_status.setText("Preview running")
         self._post_msg("Camera preview started.")
+        if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
+            self.microscope_tab_widget.on_view_started()
 
     def _update_camera_frame(self):
         if not self.camera_connected or self.camera_cap is None:
@@ -1260,7 +1272,9 @@ class StageGUI2(QMainWindow):
             self._update_camera_placeholder("Preview unavailable")
             self._post_msg("WARNING: Failed to read camera frame.")
             return
-        
+
+        self.raw_frame_ready.emit(frame)
+
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = frame_rgb.shape
         bytes_per_line = ch * w
@@ -1298,6 +1312,9 @@ class StageGUI2(QMainWindow):
         self.lab_camera_status.setText("Camera disconnected")
         self._update_camera_placeholder("No camera connected")
         self._post_msg("Camera disconnected.")
+
+        if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
+            self.microscope_tab_widget.on_camera_disconnected()
 
     # ---------------------------- jog timers ----------------------------
     def _mk_jog_timers(self):
@@ -1740,25 +1757,15 @@ class StageGUI2(QMainWindow):
 
     # ------------------------------ shutdown ------------------------------
     def closeEvent(self, ev):
-        # Prevent closing if camera is still connected
-        gantry_cam_connected = getattr(self, "camera_connected", False)
-        microscope_cam_connected = (
-            hasattr(self, "microscope_tab_widget")
-            and self.microscope_tab_widget is not None
-            and getattr(self.microscope_tab_widget, "camera_connected", False)
-        )
-        if gantry_cam_connected or microscope_cam_connected:
+        if getattr(self, "camera_connected", False):
             reply = QMessageBox.question(
                 self,
                 "Camera still connected",
                 "Camera is still connected.\nDisconnect and exit?",
-                QMessageBox.Yes | QMessageBox.No    
+                QMessageBox.Yes | QMessageBox.No
             )
             if reply == QMessageBox.Yes:
-                if gantry_cam_connected:
-                    self._disconnect_camera()
-                if microscope_cam_connected:
-                    self.microscope_tab_widget.disconnect_camera()
+                self._disconnect_camera()
             else:
                 ev.ignore()
                 return

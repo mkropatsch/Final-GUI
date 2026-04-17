@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import cv2
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal
 
 try:
     import sys as _sys
@@ -18,6 +18,7 @@ except Exception:
     _DNX64_DLL = None
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QGridLayout,
@@ -26,7 +27,6 @@ from PyQt5.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
-    QComboBox,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -59,10 +59,6 @@ class MicroscopeTab(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
 
-        self.camera_cap = None
-        self.camera_connected = False
-        self.preview_live = False
-        self.current_camera_index = None
         self.last_frame_bgr = None
         self.last_display_frame = None
         self.snapshot_dir = os.path.join(os.getcwd(), "microscope_snapshots")
@@ -72,14 +68,8 @@ class MicroscopeTab(QWidget):
         self.video_writer = None
         self.recording_start_time = None
 
-        self.timer = QTimer(self)
-        self.timer.setInterval(33)
-        self.timer.timeout.connect(self._update_frame)
-
         self._build_ui()
-        self.refresh_cameras()
         self._update_placeholder("No camera connected")
-        self.btn_view.setEnabled(False)
         self.btn_snapshot.setEnabled(False)
         self.btn_record.setEnabled(False)
 
@@ -143,22 +133,11 @@ class MicroscopeTab(QWidget):
         cam_group = QGroupBox("Camera")
         cam_form = QGridLayout(cam_group)
 
-        self.camera_combo = QComboBox()
-        self.camera_combo.setMinimumWidth(160)
-        self.btn_refresh = QPushButton("Refresh")
-        self.btn_connect = QPushButton("Connect")
-        self.btn_view = QPushButton("Start View")
-
         self.camera_status = QLabel("Disconnected")
         self.camera_status.setStyleSheet("color: #ffb347; font-weight: bold;")
 
-        cam_form.addWidget(QLabel("Select Camera"), 0, 0)
-        cam_form.addWidget(self.camera_combo, 0, 1, 1, 2)
-        cam_form.addWidget(self.btn_refresh, 1, 0)
-        cam_form.addWidget(self.btn_connect, 1, 1)
-        cam_form.addWidget(self.btn_view, 1, 2)
-        cam_form.addWidget(QLabel("Status"), 2, 0)
-        cam_form.addWidget(self.camera_status, 2, 1, 1, 2)
+        cam_form.addWidget(QLabel("Status"), 0, 0)
+        cam_form.addWidget(self.camera_status, 0, 1)
 
         capture_group = QGroupBox("Capture")
         capture_layout = QVBoxLayout(capture_group)
@@ -256,9 +235,6 @@ class MicroscopeTab(QWidget):
         )
 
         # signals
-        self.btn_refresh.clicked.connect(self.refresh_cameras)
-        self.btn_connect.clicked.connect(self._on_connect_clicked)
-        self.btn_view.clicked.connect(self._on_view_clicked)
         self.btn_folder.clicked.connect(self._choose_folder)
         self.btn_snapshot.clicked.connect(self._save_snapshot)
         self.btn_record.clicked.connect(self._toggle_recording)
@@ -266,103 +242,21 @@ class MicroscopeTab(QWidget):
             lambda v: self.lab_threshold.setText(str(v))
         )
 
-    # ----------------------- camera management -----------------------
-    def refresh_cameras(self) -> None:
-        self.camera_combo.clear()
-
-        found_any = False
-        for idx in range(5):
-            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-            if cap is not None and cap.isOpened():
-                self.camera_combo.addItem(f"Camera {idx}", idx)
-                found_any = True
-                cap.release()
-
-        if not found_any:
-            self.camera_combo.addItem("(no cameras found)", None)
-
-    def _on_connect_clicked(self) -> None:
-        if self.camera_connected:
-            self.disconnect_camera()
-            return
-
-        cam_index = self.camera_combo.currentData()
-        if cam_index is None:
-            QMessageBox.warning(self, "Camera", "Please select a valid camera.")
-            return
-
-        cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
-        if cap is None or not cap.isOpened():
-            QMessageBox.warning(self, "Camera", f"Could not open camera {cam_index}.")
-            return
-
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-
-        self.camera_cap = cap
-        self.camera_connected = True
-        self.current_camera_index = cam_index
-
+    # ----------------------- camera state callbacks (called by MainWindow) -----------------------
+    def on_camera_connected(self, cam_index: int) -> None:
         self.camera_status.setText(f"Connected: Camera {cam_index}")
         self.camera_status.setStyleSheet("color: #66dd88; font-weight: bold;")
-        self.btn_connect.setText("Disconnect")
-        self.btn_view.setEnabled(True)
         self.btn_snapshot.setEnabled(True)
         self.btn_record.setEnabled(True)
         self._update_placeholder("Camera connected - preview off")
         self.preview_info.setText("Camera ready")
         self.view_state_changed.emit(True, False)
 
-        if _DNX64Class is not None:
-            try:
-                dnx = _DNX64Class(_DNX64_DLL)
-                dnx.SetVideoDeviceIndex(cam_index)
-                dnx.SetLEDState(0, 0)
-            except Exception:
-                pass
-
-    def _on_view_clicked(self) -> None:
-        if not self.camera_connected or self.camera_cap is None:
-            QMessageBox.warning(self, "Camera", "Connect a camera first.")
-            return
-
-        if self.preview_live:
-            self.timer.stop()
-            self.preview_live = False
-            self.btn_view.setText("Start View")
-            self._update_placeholder("Camera connected - preview off")
-            self.preview_info.setText("Preview stopped")
-            self.frame_ready.emit(None)
-            self.view_state_changed.emit(True, False)
-            return
-
-        self.timer.start()
-        self.preview_live = True
-        self.btn_view.setText("Stop View")
-        self.preview_info.setText("Preview running")
-        self.view_state_changed.emit(True, True)
-
-    def disconnect_camera(self) -> None:
+    def on_camera_disconnected(self) -> None:
         if self.recording:
             self._stop_recording()
-        self.timer.stop()
-        self.preview_live = False
-
-        if self.camera_cap is not None:
-            try:
-                self.camera_cap.release()
-            except Exception:
-                pass
-
-        self.camera_cap = None
-        self.camera_connected = False
-        self.current_camera_index = None
         self.last_frame_bgr = None
         self.last_display_frame = None
-
-        self.btn_connect.setText("Connect")
-        self.btn_view.setText("Start View")
-        self.btn_view.setEnabled(False)
         self.btn_snapshot.setEnabled(False)
         self.btn_record.setEnabled(False)
         self.camera_status.setText("Disconnected")
@@ -376,21 +270,19 @@ class MicroscopeTab(QWidget):
         self.lab_area.setText("0")
         self.lab_contours.setText("0")
 
+    def on_view_started(self) -> None:
+        self.preview_info.setText("Preview running")
+        self.view_state_changed.emit(True, True)
+
+    def on_view_stopped(self) -> None:
+        self._update_placeholder("Camera connected - preview off")
+        self.preview_info.setText("Preview stopped")
+        self.frame_ready.emit(None)
+        self.view_state_changed.emit(True, False)
+
     # --------------------------- frame update ---------------------------
-    def _update_frame(self) -> None:
-        if not self.camera_connected or self.camera_cap is None:
-            return
-
-        ret, frame = self.camera_cap.read()
-        if not ret or frame is None:
-            self.timer.stop()
-            self.preview_live = False
-            self.btn_view.setText("Start View")
-            self._update_placeholder("Preview unavailable")
-            self.preview_info.setText("Failed to read frame")
-            self.view_state_changed.emit(True, False)
-            return
-
+    def receive_frame(self, frame) -> None:
+        """Called by MainWindow each capture tick with the raw BGR frame."""
         self.last_frame_bgr = frame.copy()
 
         display_bgr, result = self._process_frame(frame)
@@ -589,7 +481,8 @@ class MicroscopeTab(QWidget):
 
     # --------------------------- cleanup ---------------------------
     def shutdown(self) -> None:
-        self.disconnect_camera()
+        if self.recording:
+            self._stop_recording()
 
 
 if __name__ == "__main__":
