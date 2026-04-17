@@ -157,6 +157,7 @@ class AutomationTab(QWidget):
     pump4_stop_requested = pyqtSignal()
     stop_all_requested = pyqtSignal()
     cam_view_toggle_requested = pyqtSignal()
+    calibration_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -388,6 +389,12 @@ class AutomationTab(QWidget):
         self.lab_phase = QLabel("Phase: —")
         self.lab_phase.setStyleSheet("color: #cfd8e3;")
 
+        self._btn_calibrate = QPushButton("Calibrate Well")
+        self._btn_calibrate.setToolTip("Open the well edge calibration dialog")
+        self._btn_calibrate.clicked.connect(self.calibration_requested)
+        self._lab_calibration = QLabel("Not calibrated")
+        self._lab_calibration.setStyleSheet("color: #ffaa00; font-size: 12px;")
+
         self.lab_home_required = QLabel("Home not set — use Set Home on Gantry tab")
         self.lab_home_required.setStyleSheet("color: #ffaa00; font-size: 12px;")
 
@@ -416,6 +423,8 @@ class AutomationTab(QWidget):
         status_layout.addWidget(self.lab_home_required)
         status_layout.addLayout(btn_row)
         status_layout.addLayout(run_dur_row)
+        status_layout.addWidget(self._btn_calibrate)
+        status_layout.addWidget(self._lab_calibration)
 
         right_col.addWidget(status_group)
 
@@ -567,6 +576,13 @@ class AutomationTab(QWidget):
         self.msg_box.verticalScrollBar().setValue(
             self.msg_box.verticalScrollBar().maximum()
         )
+
+    def set_calibration_result(self, center_px: tuple, radius_px: float) -> None:
+        cx, cy = center_px
+        self._lab_calibration.setText(
+            f"Calibrated — center ({cx:.1f}, {cy:.1f}) px, r={radius_px:.1f} px"
+        )
+        self._lab_calibration.setStyleSheet("color: #66dd88; font-size: 12px;")
 
     def on_home_set_changed(self, home_set: bool) -> None:
         self.btn_start.setEnabled(home_set)

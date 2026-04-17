@@ -42,6 +42,7 @@ from tabs.sensors_tab import SensorsTab
 from tabs.automation_tab import AutomationTab
 
 from tabs.microscope_tab import MicroscopeTab
+from tabs.calibration_dialog import CalibrationDialog
 
 try:
     import serial.tools.list_ports as list_ports
@@ -880,6 +881,9 @@ class StageGUI2(QMainWindow):
         # Notify automation tab when home is set/cleared
         self.home_set_changed.connect(self.automation_tab_widget.on_home_set_changed)
 
+        # Calibration dialog
+        self.automation_tab_widget.calibration_requested.connect(self._open_calibration_dialog)
+
         self.pages.addWidget(self.gantry_page)          # index 0
         self.pages.addWidget(self.sensors_tab_widget)   # index 1
         self.pages.addWidget(self.microscope_tab_widget)      # index 2
@@ -1300,6 +1304,28 @@ class StageGUI2(QMainWindow):
 
         self.camera_view.setPixmap(scaled)
         self.camera_view.setText("")
+
+    def _open_calibration_dialog(self) -> None:
+        if not self.camera_preview_live:
+            QMessageBox.information(
+                self, "Camera Required",
+                "Start the camera preview on the Gantry tab before calibrating."
+            )
+            return
+        dlg = CalibrationDialog(
+            command_sink=self._send_gui_msg,
+            return_pos=dict(self._camera_stage_abs),
+            parent=self,
+        )
+        self.raw_frame_ready.connect(dlg.receive_frame)
+        try:
+            if dlg.exec_() == CalibrationDialog.Accepted:
+                if dlg.well_center_px is not None:
+                    self.automation_tab_widget.set_calibration_result(
+                        dlg.well_center_px, dlg.well_radius_px
+                    )
+        finally:
+            self.raw_frame_ready.disconnect(dlg.receive_frame)
 
     def _disconnect_camera(self):
         self.camera_timer.stop()
