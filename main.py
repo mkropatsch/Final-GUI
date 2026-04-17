@@ -1689,6 +1689,33 @@ class StageGUI2(QMainWindow):
                     QMessageBox.warning(self, "Warning", text)
                 elif level == "ERROR":
                     QMessageBox.critical(self, "Error", text)
+            elif typ == "disconnected":
+                channel = msg.get("channel", "unknown")
+                reason = msg.get("reason", "unknown error")
+                port = msg.get("port", "unknown")
+                self._post_msg(f"ERROR: {channel} stage lost connection on {port}: {reason}")
+
+                if self.routine is not None and self.routine.is_running:
+                    self.routine.stop()
+                    self._post_msg("Routine stopped due to disconnection.")
+
+                if self._home_set:
+                    self._home_set = False
+                    self.home_set_changed.emit(False)
+
+                label_text = f"{channel.capitalize()} Stage: Lost Connection"
+                if channel == "needle":
+                    self.needle_status_label.setText(label_text)
+                else:
+                    self.camera_stage_status_label.setText(label_text)
+
+                QMessageBox.warning(
+                    self,
+                    "Stage Disconnected",
+                    f"The {channel} stage lost its serial connection on {port}.\n\n"
+                    f"Reason: {reason}\n\n"
+                    "The routine has been stopped. Reconnect and re-home before continuing.",
+                )
             elif typ == "controller_state":
                 mapping = msg.get("mapping", {})
                 self._post_msg(f"Controller mapping loaded: {mapping}")

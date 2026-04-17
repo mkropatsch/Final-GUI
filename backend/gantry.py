@@ -371,7 +371,8 @@ class GantrySystem:  # basically the manager
                         try:
                             ch.board.request_data()
                         except Exception as e:
-                            self._send_message("warning", f"{ch.name.capitalize()} request_data failed: {e}")
+                            if not self._check_disconnect(ch, e):
+                                self._send_message("warning", f"{ch.name.capitalize()} request_data failed: {e}")
 
                 self._publish_state()
                 t_gui = now
@@ -450,7 +451,8 @@ class GantrySystem:  # basically the manager
                                     board.send_gcode(cmd)
 
                             except Exception as e:
-                                self._send_message("error", f"{ch.name.capitalize()} GCODE failed: {e}")
+                                if not self._check_disconnect(ch, e):
+                                    self._send_message("error", f"{ch.name.capitalize()} GCODE failed: {e}")
 
                 elif typ == "home_all":
                     for ch in targets:
@@ -463,7 +465,8 @@ class GantrySystem:  # basically the manager
                             ch.state.x = ch.state.y = ch.state.z = ch.state.e = 0.0
                             self._send_message("info", f"Homing all axes on {ch.name}.")
                         except Exception as e:
-                            self._send_message("error", f"{ch.name.capitalize()} home failed: {e}")
+                            if not self._check_disconnect(ch, e):
+                                self._send_message("error", f"{ch.name.capitalize()} home failed: {e}")
 
                 elif typ == "set_steps" or (typ == "gantry_cmd" and msg.get("cmd") == "set_steps"):
                     for k in ("xy_step", "z_step", "e_step"):
@@ -574,7 +577,8 @@ class GantrySystem:  # basically the manager
                                 ch.state.feed = feed
                                 self._send_message("info", f"{ch.name.capitalize()} ABS move -> {axes} @ F{feed}")
                             except Exception as e:
-                                self._send_message("error", f"{ch.name.capitalize()} ABS move failed: {e}")
+                                if not self._check_disconnect(ch, e):
+                                    self._send_message("error", f"{ch.name.capitalize()} ABS move failed: {e}")
 
                         self.feed = feed
                         self.state.feed = feed
@@ -608,7 +612,8 @@ class GantrySystem:  # basically the manager
                                     f"{ch.name.capitalize()} current position set as home (0, 0, 0)."
                                 )
                             except Exception as e:
-                                self._send_message("error", f"{ch.name.capitalize()} set home failed: {e}")
+                                if not self._check_disconnect(ch, e):
+                                    self._send_message("error", f"{ch.name.capitalize()} set home failed: {e}")
 
         except queue.Empty:
             pass
@@ -721,7 +726,8 @@ class GantrySystem:  # basically the manager
             try:
                 board.jog(axes, self.feed)
             except Exception as e:
-                self._send_message("error", f"{ch.name.capitalize()} jog failed: {e}")
+                if not self._check_disconnect(ch, e):
+                    self._send_message("error", f"{ch.name.capitalize()} jog failed: {e}")
 
     # ------------------------------- outbound --------------------------------
 
@@ -785,6 +791,16 @@ class GantrySystem:  # basically the manager
             "port": ch.port or "unknown",
             "reason": str(e),
         })
+
+    def _check_disconnect(self, ch: MotionChannel, e: Exception) -> bool:
+        """Return True and call _mark_disconnected if e looks like a hardware disconnection."""
+        msg = str(e).lower()
+        if any(k in msg for k in ("writefile", "permissionerror", "device not recognized",
+                                   "access is denied", "clearcommerror", "serialexception",
+                                   "port is closed", "device disconnected")):
+            self._mark_disconnected(ch, e)
+            return True
+        return False
 
     def _send_message(self, level: str, text: str):
         self.q_to_gui.put({"type": "message", "level": level, "text": text})
