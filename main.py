@@ -864,10 +864,8 @@ class StageGUI2(QMainWindow):
         self.automation_tab_widget.pump4_stop_requested.connect(self._on_pump4_stop)
         self.automation_tab_widget.stop_all_requested.connect(self._on_stop_all_pumps)
 
-        # Mirror the microscope camera feed into the automation tab
-        self.microscope_tab_widget.frame_ready.connect(
-            self.automation_tab_widget.update_camera_frame
-        )
+        # Push raw frames to automation tab for live edge detection
+        self.raw_frame_ready.connect(self.automation_tab_widget.receive_raw_frame)
         self.microscope_tab_widget.view_state_changed.connect(
             self.automation_tab_widget.set_cam_view_state
         )

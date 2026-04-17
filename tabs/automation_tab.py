@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import random as _random
 from dataclasses import dataclass
 
+import cv2
+import numpy as np
+
 from PyQt5.QtCore import Qt, QDateTime, QRectF, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPixmap
+from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPixmap, QImage
+from tabs.calibration_dialog import ransac_circle
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -161,6 +166,10 @@ class AutomationTab(QWidget):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
+        self._calib_center: tuple | None = None
+        self._calib_radius: float | None = None
+        self._circle_history: list = []
+        self._smooth_window: int = 8
         self._build_ui()
         self._apply_plate_preset("24")
 
@@ -570,6 +579,54 @@ class AutomationTab(QWidget):
         self.cam_feed_label.setPixmap(scaled)
         self.cam_feed_label.setText("")
 
+    def receive_raw_frame(self, frame_bgr) -> None:
+        if frame_bgr is None:
+            return
+
+        if self._calib_radius is None:
+            self._show_bgr_in_feed(frame_bgr)
+            return
+
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blur, 50, 150)
+
+        ys, xs = np.where(edges > 0)
+        display = frame_bgr.copy()
+        display[edges > 0] = [0, 180, 0]  # highlight edges in green
+
+        if len(xs) >= 3:
+            pts = list(zip(xs.tolist(), ys.tolist()))
+            if len(pts) > 150:
+                pts = _random.sample(pts, 150)
+
+            result = ransac_circle(pts, n_iter=100, inlier_thresh=8.0)
+            if result is not None:
+                cx, cy, r = result
+                if abs(r - self._calib_radius) / max(self._calib_radius, 1.0) < 0.25:
+                    self._circle_history.append((cx, cy, r))
+                    if len(self._circle_history) > self._smooth_window:
+                        self._circle_history.pop(0)
+
+        if self._circle_history:
+            cx = sum(c[0] for c in self._circle_history) / len(self._circle_history)
+            cy = sum(c[1] for c in self._circle_history) / len(self._circle_history)
+            cv2.circle(display, (int(cx), int(cy)), int(self._calib_radius), (0, 200, 255), 2)
+            cv2.circle(display, (int(cx), int(cy)), 5, (0, 200, 255), -1)
+
+        self._show_bgr_in_feed(display)
+
+    def _show_bgr_in_feed(self, frame_bgr) -> None:
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        h, w, ch = frame_rgb.shape
+        qimg = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)
+        pix = QPixmap.fromImage(qimg)
+        scaled = pix.scaled(
+            self.cam_feed_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
+        self.cam_feed_label.setPixmap(scaled)
+        self.cam_feed_label.setText("")
+
     def post_message(self, text: str) -> None:
         stamp = QDateTime.currentDateTime().toString("yyyy-MM-dd HH:mm:ss")
         self.msg_box.appendPlainText(f"[{stamp}] {text}")
@@ -578,6 +635,9 @@ class AutomationTab(QWidget):
         )
 
     def set_calibration_result(self, center_px: tuple, radius_px: float) -> None:
+        self._calib_center = center_px
+        self._calib_radius = radius_px
+        self._circle_history.clear()
         cx, cy = center_px
         self._lab_calibration.setText(
             f"Calibrated — center ({cx:.1f}, {cy:.1f}) px, r={radius_px:.1f} px"

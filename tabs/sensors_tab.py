@@ -264,9 +264,6 @@ class SensorsTab(QWidget):
         self.btn_connect = QPushButton("Connect")
         self.btn_record = QPushButton("Start Recording")
         self.btn_clear = QPushButton("Clear Graphs")
-        # TODO: delete this button — for demo only
-        self.btn_test_alert = QPushButton("⚠ Test Alert")
-
         self.conn_status = QLabel("Not connected")
         self.conn_status.setMinimumWidth(240)
         self.conn_status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -277,7 +274,6 @@ class SensorsTab(QWidget):
         conn_layout.addWidget(self.btn_connect)
         conn_layout.addWidget(self.btn_record)
         conn_layout.addWidget(self.btn_clear)
-        conn_layout.addWidget(self.btn_test_alert)
         conn_layout.addSpacing(12)
         conn_layout.addWidget(self.conn_status)
         conn_layout.addStretch()
@@ -411,7 +407,6 @@ class SensorsTab(QWidget):
         self.btn_connect.clicked.connect(self.toggle_connect)
         self.btn_record.clicked.connect(self.toggle_recording)
         self.btn_clear.clicked.connect(self._clear_graphs)
-        self.btn_test_alert.clicked.connect(self._demo_alert)  # TODO: delete
 
         self.setStyleSheet(
             """
@@ -876,14 +871,6 @@ class SensorsTab(QWidget):
         else:
             self._rng_rh_current.setText("—")
             self._rng_rh_status.setStyleSheet(NA)
-
-    def _demo_alert(self) -> None:  # TODO: delete
-        QMessageBox.warning(
-            self, "Sensor Alert",
-            f"Temperature trending upward: 38.42°C\n"
-            f"Readings have been consistently rising outside the desired range "
-            f"({self.THRESH_TEMP_LOW}–{self.THRESH_TEMP_HIGH}°C)."
-        )
 
     def shutdown(self) -> None:
         if self.is_recording:

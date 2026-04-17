@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QSlider,
     QVBoxLayout,
 )
 
@@ -128,7 +129,7 @@ class CalibrationDialog(QDialog):
         )
         instr.setWordWrap(True)
         instr.setStyleSheet(
-            "background: #1e2a3a; color: #c8d8ee; font-size: 13px; "
+            "background: #1e2a3a; color: #c8d8ee; font-size: 16px; "
             "padding: 10px; border-radius: 4px;"
         )
         root.addWidget(instr)
@@ -214,6 +215,23 @@ class CalibrationDialog(QDialog):
         self._lab_fit_status.setStyleSheet("color: #b8c4d9; font-size: 12px;")
         fit_vbox.addWidget(self._btn_fit)
         fit_vbox.addWidget(self._lab_fit_status)
+
+        self._lab_radius_adjust = QLabel("Adjust radius:")
+        self._lab_radius_adjust.setStyleSheet("color: #c8d8ee;")
+        self._sld_radius = QSlider(Qt.Horizontal)
+        self._sld_radius.setMinimum(10)
+        self._sld_radius.setMaximum(1000)
+        self._sld_radius.valueChanged.connect(self._on_radius_slider)
+        self._lab_radius_value = QLabel("")
+        self._lab_radius_value.setStyleSheet("color: #c8d8ee; font-size: 12px;")
+
+        self._lab_radius_adjust.setVisible(False)
+        self._sld_radius.setVisible(False)
+        self._lab_radius_value.setVisible(False)
+
+        fit_vbox.addWidget(self._lab_radius_adjust)
+        fit_vbox.addWidget(self._sld_radius)
+        fit_vbox.addWidget(self._lab_radius_value)
         ctrl.addWidget(fit_group)
 
         ctrl.addStretch()
@@ -299,6 +317,9 @@ class CalibrationDialog(QDialog):
         self._btn_accept.setEnabled(False)
         self._lab_point_count.setText("Points placed: 0")
         self._lab_fit_status.setText("No fit yet")
+        self._lab_radius_adjust.setVisible(False)
+        self._sld_radius.setVisible(False)
+        self._lab_radius_value.setVisible(False)
         self._redraw()
 
     # ── Circle fitting ────────────────────────────────────────────────────────
@@ -323,8 +344,27 @@ class CalibrationDialog(QDialog):
         self._btn_accept.setEnabled(True)
         self._lab_fit_status.setText(
             f"Center: ({cx:.1f}, {cy:.1f})\nRadius: {r:.1f} px\n\n"
-            "If the circle looks wrong, click Fit Circle again or add more points."
+            "Drag the slider to adjust radius if the fit is too small or large."
         )
+
+        self._sld_radius.blockSignals(True)
+        self._sld_radius.setMinimum(max(10, int(r * 0.3)))
+        self._sld_radius.setMaximum(int(r * 2.5))
+        self._sld_radius.setValue(int(r))
+        self._sld_radius.blockSignals(False)
+
+        self._lab_radius_adjust.setVisible(True)
+        self._sld_radius.setVisible(True)
+        self._lab_radius_value.setVisible(True)
+        self._lab_radius_value.setText(f"{r:.1f} px")
+        self._redraw()
+
+    def _on_radius_slider(self, value: int) -> None:
+        if self._circle is None:
+            return
+        cx, cy, _ = self._circle
+        self._circle = (cx, cy, float(value))
+        self._lab_radius_value.setText(f"{value} px")
         self._redraw()
 
     # ── Jog ───────────────────────────────────────────────────────────────────
