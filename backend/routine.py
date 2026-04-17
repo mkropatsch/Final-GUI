@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Callable, Iterator, Optional, Tuple
 
@@ -18,6 +19,7 @@ class RoutineConfig:
     serpentine: bool = True
     dispense_ms: int = 0
     retract_ms: int = 0
+    total_run_s: float = 0.0
 
 
 class RoutineController(QObject):
@@ -41,6 +43,7 @@ class RoutineController(QObject):
 
         self._config = RoutineConfig()
         self._running = False
+        self._run_start_time: float = 0.0
 
         self._row = 0
         self._col = 0
@@ -74,6 +77,7 @@ class RoutineController(QObject):
             return
 
         self._running = True
+        self._run_start_time = time.time()
         self._row = 0
         self._col = 0
         self._move_iter = iter(
@@ -181,10 +185,9 @@ class RoutineController(QObject):
             return
 
         try:
-            next_row, next_col, dcol, drow = next(self._move_iter)
+            next_row, next_col, _dcol, _drow = next(self._move_iter)
         except StopIteration:
-            self.log_message.emit("Routine complete. Returning to home.")
-            
+            self.log_message.emit("Routine pass complete. Returning to A1.")
             self._emit_status(
                 "Running",
                 phase="Returning home",
@@ -192,7 +195,6 @@ class RoutineController(QObject):
                 highlight_row=self._row,
                 highlight_col=self._col,
             )
-            
             self._send_command({
                 "type": "gantry_cmd",
                 "cmd": "move_abs",
@@ -202,31 +204,47 @@ class RoutineController(QObject):
                 "E": 0.0,
             })
             self._send_motion_barrier()
-            
-            self.log_message.emit("Returned to set home.")
-            
-            self.status_changed.emit({
-                "status":"Complete",
-                "phase":"Done",
-                "current_well":None,
-                "highlight_row":None,
-                "highlight_col":None,
-            })
-            
-            self._running = False
-            self._phase = "idle"
+
+            elapsed = time.time() - self._run_start_time
+            if self._config.total_run_s > 0 and elapsed < self._config.total_run_s:
+                remaining = self._config.total_run_s - elapsed
+                self.log_message.emit(
+                    f"Repeating routine ({remaining:.0f}s remaining)."
+                )
+                self._row = 0
+                self._col = 0
+                self._move_iter = iter(
+                    self._grid_iter(
+                        rows=self._config.rows,
+                        cols=self._config.cols,
+                        serpentine=self._config.serpentine,
+                    )
+                )
+                self._phase = "z_down"
+                self._timer.start(0)
+            else:
+                self.log_message.emit("Routine complete.")
+                self.status_changed.emit({
+                    "status": "Complete",
+                    "phase": "Done",
+                    "current_well": None,
+                    "highlight_row": None,
+                    "highlight_col": None,
+                })
+                self._running = False
+                self._phase = "idle"
             return
 
-        dx_mm = dcol * self._config.dx
-        dy_mm = drow * self._config.dy
+        abs_x = float(next_col * self._config.dx)
+        abs_y = float(next_row * self._config.dy)
 
         self._send_command({
             "type": "gantry_cmd",
-            "cmd": "move_rel",
-            "dx": float(dx_mm),
-            "dy": float(dy_mm),
-            "dz": 0.0,
-            "de": 0.0,
+            "cmd": "move_abs",
+            "X": abs_x,
+            "Y": abs_y,
+            "Z": 0.0,
+            "E": 0.0,
         })
         self._send_motion_barrier()
 
@@ -234,8 +252,8 @@ class RoutineController(QObject):
         self._col = next_col
 
         self.log_message.emit(
-            f"Moved to {self._well_name(self._row, self._col)} "
-            f"(dx={dx_mm:.3f}, dy={dy_mm:.3f})."
+            f"Moving to {self._well_name(self._row, self._col)} "
+            f"(X={abs_x:.3f}, Y={abs_y:.3f})."
         )
 
         self._phase = "z_down"
@@ -258,8 +276,9 @@ class RoutineController(QObject):
             dz=_f("dz", 0.0),
             wait_s=_f("wait_s", 1.0),
             serpentine=bool(raw.get("serpentine", True)),
-            dispense_ms = int(_f("dispense_ms", 0)),
-            retract_ms = int(_f("retract_ms", 0)),
+            dispense_ms=int(_f("dispense_ms", 0)),
+            retract_ms=int(_f("retract_ms", 0)),
+            total_run_s=_f("total_run_s", 0.0),
         )
 
     def _grid_iter(

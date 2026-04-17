@@ -95,6 +95,7 @@ def controller_process_main(q_from_gui_to_ctrl, q_to_gantry,
 # ---------------------------------- GUI --------------------------------------
 class StageGUI2(QMainWindow):
     raw_frame_ready = pyqtSignal(object)   # emits raw BGR numpy frame each capture tick
+    home_set_changed = pyqtSignal(bool)    # emits True when Set Home is confirmed
 
     def __init__(self):
         super().__init__()
@@ -128,6 +129,8 @@ class StageGUI2(QMainWindow):
         self._last_abs = {"x": 0.0, "y": 0.0, "z": 0.0, "e": 0.0}
         self._needle_abs = {"x": 0.0, "y": 0.0, "z": 0.0, "e": 0.0}
         self._camera_stage_abs = {"x": 0.0, "y": 0.0, "z": 0.0, "e": 0.0}
+
+        self._home_set = False
 
         ## Camera state
         self.camera_cap = None
@@ -874,6 +877,9 @@ class StageGUI2(QMainWindow):
         # Push raw BGR frames to MicroscopeTab for display and recording
         self.raw_frame_ready.connect(self.microscope_tab_widget.receive_frame)
 
+        # Notify automation tab when home is set/cleared
+        self.home_set_changed.connect(self.automation_tab_widget.on_home_set_changed)
+
         self.pages.addWidget(self.gantry_page)          # index 0
         self.pages.addWidget(self.sensors_tab_widget)   # index 1
         self.pages.addWidget(self.microscope_tab_widget)      # index 2
@@ -1162,6 +1168,9 @@ class StageGUI2(QMainWindow):
         self.q_ctrl_to_gantry = None
         was_connected = self._connected
         self._connected = False
+        if self._home_set:
+            self._home_set = False
+            self.home_set_changed.emit(False)
 
         self.btn_connect.setText("Connect")
         self.needle_status_label.setText("Needle Stage: Disconnected")
@@ -1579,10 +1588,20 @@ class StageGUI2(QMainWindow):
             self._post_msg("WARNING: Not connected.")
             QMessageBox.warning(self, "Warning", "Not connected.")
             return
+        reply = QMessageBox.question(
+            self,
+            "Set Home",
+            "Make sure the needle is centered on well A1 (top-left well) before setting home.\n\nContinue?",
+            QMessageBox.Yes | QMessageBox.Cancel,
+        )
+        if reply != QMessageBox.Yes:
+            return
         self._send_gui_msg({
             "type": "gantry_cmd",
             "cmd": "set_home",
         })
+        self._home_set = True
+        self.home_set_changed.emit(True)
         self._post_msg("Set home sent. Current position is now (0, 0, 0).")
 
     def _on_estop(self):

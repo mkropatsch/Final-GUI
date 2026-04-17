@@ -388,8 +388,12 @@ class AutomationTab(QWidget):
         self.lab_phase = QLabel("Phase: —")
         self.lab_phase.setStyleSheet("color: #cfd8e3;")
 
+        self.lab_home_required = QLabel("Home not set — use Set Home on Gantry tab")
+        self.lab_home_required.setStyleSheet("color: #ffaa00; font-size: 12px;")
+
         btn_row = QHBoxLayout()
         self.btn_start = QPushButton("Start Routine")
+        self.btn_start.setEnabled(False)
         self.btn_stop = QPushButton("Stop Routine")
         self.btn_stop.setStyleSheet(
             "QPushButton { background-color: #6a3030; color: white; font-weight: 600; }"
@@ -398,10 +402,20 @@ class AutomationTab(QWidget):
         btn_row.addWidget(self.btn_start)
         btn_row.addWidget(self.btn_stop)
 
+        run_dur_row = QHBoxLayout()
+        run_dur_row.addWidget(QLabel("Run for (min):"))
+        self.in_run_duration = QLineEdit("0")
+        self.in_run_duration.setFixedWidth(60)
+        self.in_run_duration.setToolTip("Total run time in minutes. 0 = run once.")
+        run_dur_row.addWidget(self.in_run_duration)
+        run_dur_row.addStretch()
+
         status_layout.addWidget(self.lab_status)
         status_layout.addWidget(self.lab_current)
         status_layout.addWidget(self.lab_phase)
+        status_layout.addWidget(self.lab_home_required)
         status_layout.addLayout(btn_row)
+        status_layout.addLayout(run_dur_row)
 
         right_col.addWidget(status_group)
 
@@ -554,7 +568,18 @@ class AutomationTab(QWidget):
             self.msg_box.verticalScrollBar().maximum()
         )
 
+    def on_home_set_changed(self, home_set: bool) -> None:
+        self.btn_start.setEnabled(home_set)
+        if home_set:
+            self.lab_home_required.setText("")
+        else:
+            self.lab_home_required.setText("Home not set — use Set Home on Gantry tab")
+
     def get_config(self) -> dict:
+        try:
+            run_min = float(self.in_run_duration.text().strip())
+        except ValueError:
+            run_min = 0.0
         return {
             "plate_type": self.cmb_plate.currentText(),
             "rows": self.spn_rows.value(),
@@ -564,6 +589,7 @@ class AutomationTab(QWidget):
             "dz": self.in_dz.text().strip(),
             "wait_s": self.in_wait.text().strip(),
             "serpentine": self.chk_serpentine.isChecked(),
+            "total_run_s": run_min * 60.0,
         }
 
 
