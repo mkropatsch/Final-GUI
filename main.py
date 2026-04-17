@@ -37,6 +37,8 @@ from PyQt5.QtWidgets import (
 )
 import pyqtgraph as pg
 
+from tabs.guide_panel import GuideWindow
+from tabs.guided_tour import GuidedTour
 from tabs.sensors_tab import SensorsTab
 
 from tabs.automation_tab import AutomationTab
@@ -63,6 +65,7 @@ pg.setConfigOption("foreground", "#dddddd") #soft white
 
 from backend.routine import RoutineController
 from backend.incubator import IncubatorSerial
+from backend.camera_manager import CameraManager
 
 # --------------------------- child (gantry) entry ----------------------------
 def gantry_process_main(q_to_gui, q_from_gui, q_from_controller,
@@ -134,15 +137,12 @@ class StageGUI2(QMainWindow):
         self._home_set = False
 
         ## Camera state
-        self.camera_cap = None
+        self.camera_manager = CameraManager(self)
         self.camera_connected = False
         self.camera_preview_live = False
         self.current_camera_index = None
-
-        self.camera_timer = QTimer(self)
-        self.camera_timer.setInterval(33)
-        self.camera_timer.timeout.connect(self._update_camera_frame)
-
+        
+        
         # --------------------------- root layout ---------------------------
         root = QWidget(self)
         self.setCentralWidget(root)
@@ -151,6 +151,10 @@ class StageGUI2(QMainWindow):
         main.setSpacing(10)
 
         # --------------------------- top tabs row --------------------------
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(8)
+        
         self.tabs = QTabBar()
         self.tabs.addTab("Gantry")
         self.tabs.addTab("Sensors")
@@ -158,7 +162,29 @@ class StageGUI2(QMainWindow):
         self.tabs.addTab("Automation")
         self.tabs.setExpanding(False)
         self.tabs.setCurrentIndex(0)
-        main.addWidget(self.tabs)
+        
+        self.btn_open_guide =  QPushButton("System Setup & Guided Tour")
+        self.btn_open_guide.setFixedHeight(28)
+        self.btn_open_guide.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2f3a;
+                color: #d0d7e2;
+                border: 1px solid #444a57;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #353b48;
+            }
+        """)
+        
+        top_row.addWidget(self.tabs)
+        top_row.addStretch()
+        top_row.addWidget(self.btn_open_guide)
+        
+        main.addLayout(top_row)
+        
         
         self.pages = QStackedWidget()
         main.addWidget(self.pages, 1)
@@ -168,6 +194,9 @@ class StageGUI2(QMainWindow):
         self.gantry_layout.setContentsMargins(0, 0, 0, 0)
         self.gantry_layout.setSpacing(10)
 
+        self.guide_window = GuideWindow(self)
+        self.tour = GuidedTour(self)
+        
         # -------------------------- connection row -------------------------
         conn_box = QGroupBox("Connection")
         conn_layout = QVBoxLayout(conn_box)
@@ -231,7 +260,7 @@ class StageGUI2(QMainWindow):
         conn_layout.addLayout(conn_bottom)
 
         self.gantry_layout.addWidget(conn_box)
-
+       
         # -------------------------- main content ---------------------------
         content = QHBoxLayout()
         content.setSpacing(12)
@@ -809,7 +838,12 @@ class StageGUI2(QMainWindow):
         
         self.btn_controller_toggle.clicked.connect(self._on_controller_toggle_clicked)
         self.btn_refresh_controller.clicked.connect(self._refresh_controller_list)
+        
+        self.btn_open_guide.clicked.connect(self._open_guide_window)
+        self.guide_window.btn_close.clicked.connect(self._open_guide_window)
 
+        self.guide_window.btn_start_tour.clicked.connect(self._start_guided_tour)
+        
         # optional dark style
         try:
             import qdarkstyle
@@ -829,6 +863,12 @@ class StageGUI2(QMainWindow):
         self.refresh_cameras()
         self._update_camera_placeholder("No camera connected")
         self.btn_camera_view.setEnabled(False)
+        
+        # Camera backend wiring
+        self.camera_manager.frame_ready.connect(self._on_camera_frame)
+        self.camera_manager.camera_state_changed.connect(self._on_camera_state_changed)
+        self.camera_manager.preview_state_changed.connect(self._on_camera_preview_changed)
+        self.camera_manager.error_occurred.connect(self._on_camera_error)
 
         self._set_motion_controls_enabled(False)
 
@@ -889,6 +929,78 @@ class StageGUI2(QMainWindow):
         
         self.tabs.currentChanged.connect(self.pages.setCurrentIndex)
         self.pages.setCurrentIndex(0)
+        
+        self.tour = GuidedTour(self)
+        
+        self.tour.steps = [
+            {
+                "tab": 0,
+                "widget": self.btn_connect,
+                "title": "Connection",
+                "text": "Use this button to connect to the gantry system."
+            },
+            {
+                "tab": 0,
+                "widget": self.motion_target_combo,
+                "title": "Motion Target",
+                "text": "Select which stage to move: Needle, Camera, or Both."
+            },
+            {
+                "tab": 0,
+                "widget": self.xy_plot,
+                "title": "Coordinate View",
+                "text": "This shows the current gantry position."
+            },
+            {
+                "tab": 0,
+                "widget": self.camera_group,
+                "title": "Camera Controls",
+                "text": "Camera controls and preview are here."
+            },
+            {
+                "tab": 0,
+                "widget": self.manual_group,
+                "title": "Manual Jog",
+                "text": "These controls let you make small movement adjustments in X, Y, and Z."
+            },
+            {
+                "tab": 0,
+                "widget": self.ctrl_group,
+                "title": "Step / Feed Settings",
+                "text": "Use this section to set jog step size, feed rate, and home-related controls."
+            },
+            {
+                "tab": 1,
+                "widget": self.sensors_tab_widget,
+                "title": "Sensors Tab",
+                "text": "This tab is used for environmental and incubator monitoring."
+            },
+            {
+                "tab": 2,
+                "widget": self.microscope_tab_widget,
+                "title": "Microscope Tab",
+                "text": "This tab handles imaging and detection."
+            },
+            {
+                "tab": 3,
+                "widget": self.automation_tab_widget,
+                "title": "Automation Tab",
+                "text": "This tab controls well plates and routines."
+            },
+        ]
+
+    def _open_guide_window(self):
+        if self.guide_window.isVisible():
+            self.guide_window.raise_()
+            self.guide_window.activateWindow()
+            return
+        self.guide_window.show()
+        self.guide_window.raise_()
+        self.guide_window.activateWindow()
+    
+    def _start_guided_tour(self):
+        self.guide_window.close()
+        self.tour.start()    
 
     # -------------------------- connection logic --------------------------
     def _on_mode_changed(self, mode: str):
@@ -1208,35 +1320,20 @@ class StageGUI2(QMainWindow):
 
     def _on_camera_connect_clicked(self):
         if self.camera_connected:
-            self._disconnect_camera()
+            self.camera_manager.disconnect_camera()
             return
-        
+
         cam_index = self.camera_combo.currentData()
         if cam_index is None:
             QMessageBox.warning(self, "Camera", "Please select a valid camera.")
             return
-        
-        cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
-        if cap is None or not cap.isOpened():
+
+        ok = self.camera_manager.connect_camera(cam_index)
+        if not ok:
             self.lab_camera_status.setText("Failed to connect")
-            QMessageBox.warning(self, "Camera", f"Could not open camera {cam_index}.")
             return
-        
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        
-        self.camera_cap = cap
-        self.camera_connected = True
+
         self.current_camera_index = cam_index
-
-        self.btn_camera_connect.setText("Disconnect")
-        self.btn_camera_view.setEnabled(True)
-        self.lab_camera_status.setText(f"Camera {cam_index} connected")
-        self._update_camera_placeholder("")
-        self._post_msg(f"Camera {cam_index} connected.")
-
-        if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
-            self.microscope_tab_widget.on_camera_connected(cam_index)
 
         if _DNX64Class is not None:
             try:
@@ -1247,64 +1344,14 @@ class StageGUI2(QMainWindow):
                 pass
 
     def _on_camera_view_clicked(self):
-        if not self.camera_connected or self.camera_cap is None:
+        if not self.camera_connected:
             QMessageBox.warning(self, "Camera", "Connect a camera first.")
             return
-        
-        if self.camera_preview_live:
-            self.camera_timer.stop()
-            self.camera_preview_live = False
-            self.btn_camera_view.setText("Start View")
-            self.lab_camera_status.setText("Preview stopped")
-            self._update_camera_placeholder("Camera connected - preview off")
-            self._post_msg("Camera preview stopped.")
-            if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
-                self.microscope_tab_widget.on_view_stopped()
-            return
+        self.camera_manager.toggle_preview()
 
-        self.camera_timer.start()
-        self.camera_preview_live = True
-        self.btn_camera_view.setText("Stop View")
-        self.lab_camera_status.setText("Preview running")
-        self._post_msg("Camera preview started.")
-        if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
-            self.microscope_tab_widget.on_view_started()
-
-    def _update_camera_frame(self):
-        if not self.camera_connected or self.camera_cap is None:
-            return
-        
-        ret, frame = self.camera_cap.read()
-        if not ret or frame is None:
-            self.camera_timer.stop()
-            self.camera_preview_live = False
-            self.btn_camera_view.setText("Start View")
-            self.lab_camera_status.setText("Frame grab failed")
-            self._update_camera_placeholder("Preview unavailable")
-            self._post_msg("WARNING: Failed to read camera frame.")
-            return
-
-        self.raw_frame_ready.emit(frame)
-
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w, ch = frame_rgb.shape
-        bytes_per_line = ch * w
-
-        qimg = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
-
-        pix = QPixmap.fromImage(qimg)
-        scaled = pix.scaled(
-            self.camera_view.width(),
-            self.camera_view.height(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
-
-        self.camera_view.setPixmap(scaled)
-        self.camera_view.setText("")
-
+    
     def _open_calibration_dialog(self) -> None:
-        if not self.camera_preview_live:
+        if not self.camera_manager.is_preview_live:
             QMessageBox.information(
                 self, "Camera Required",
                 "Start the camera preview on the Gantry tab before calibrating."
@@ -1326,29 +1373,31 @@ class StageGUI2(QMainWindow):
             self.raw_frame_ready.disconnect(dlg.receive_frame)
 
     def _disconnect_camera(self):
-        self.camera_timer.stop()
-        self.camera_preview_live = False
+        self.camera_manager.disconnect_camera()
+        
+    
+    def _on_camera_frame(self, frame):
+        if frame is None:
+            return
 
-        if self.camera_cap is not None:
-            try:
-                self.camera_cap.release()
-            except Exception:
-                pass
+        self.raw_frame_ready.emit(frame)
 
-        self.camera_cap = None
-        self.camera_connected = False
-        self.current_camera_index = None
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = frame_rgb.shape
+        bytes_per_line = ch * w
 
-        self.btn_camera_connect.setText("Connect")
-        self.btn_camera_view.setText("Start View")
-        self.btn_camera_view.setEnabled(False)
-        self.lab_camera_status.setText("Camera disconnected")
-        self._update_camera_placeholder("No camera connected")
-        self._post_msg("Camera disconnected.")
+        qimg = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        pix = QPixmap.fromImage(qimg)
+        scaled = pix.scaled(
+            self.camera_view.width(),
+            self.camera_view.height(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation,
+        )
 
-        if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
-            self.microscope_tab_widget.on_camera_disconnected()
-
+        self.camera_view.setPixmap(scaled)
+        self.camera_view.setText("") 
+        
     # ---------------------------- jog timers ----------------------------
     def _mk_jog_timers(self):
         self._t = {}
@@ -1849,6 +1898,60 @@ class StageGUI2(QMainWindow):
             
         ev.accept()
 
+    def _on_camera_state_changed(self, connected: bool) -> None:
+        self.camera_connected = connected
+
+        if connected:
+            cam_index = self.camera_manager.camera_index
+            self.current_camera_index = cam_index
+            self.btn_camera_connect.setText("Disconnect")
+            self.btn_camera_view.setEnabled(True)
+            self.lab_camera_status.setText(f"Camera {cam_index} connected")
+            self._update_camera_placeholder("")
+            self._post_msg(f"Camera {cam_index} connected.")
+
+            if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
+                self.microscope_tab_widget.on_camera_connected(cam_index)
+        else:
+            self.current_camera_index = None
+            self.btn_camera_connect.setText("Connect")
+            self.btn_camera_view.setText("Start View")
+            self.btn_camera_view.setEnabled(False)
+            self.lab_camera_status.setText("Camera disconnected")
+            self._update_camera_placeholder("No camera connected")
+            self._post_msg("Camera disconnected.")
+
+            if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
+                self.microscope_tab_widget.on_camera_disconnected()
+
+    def _on_camera_preview_changed(self, live: bool) -> None:
+        self.camera_preview_live = live
+
+        if live:
+            self.btn_camera_view.setText("Stop View")
+            self.lab_camera_status.setText("Preview running")
+            self._post_msg("Camera preview started.")
+
+            if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
+                self.microscope_tab_widget.on_view_started()
+        else:
+            self.btn_camera_view.setText("Start View")
+            if self.camera_connected:
+                self.lab_camera_status.setText("Preview stopped")
+                self._update_camera_placeholder("Camera connected - preview off")
+            else:
+                self.lab_camera_status.setText("Camera idle")
+
+            self._post_msg("Camera preview stopped.")
+
+            if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
+                self.microscope_tab_widget.on_view_stopped()
+
+    def _on_camera_error(self, text: str) -> None:
+        self.lab_camera_status.setText("Camera error")
+        self._update_camera_placeholder("Preview unavailable")
+        self._post_msg(f"WARNING: {text}")
+        QMessageBox.warning(self, "Camera", text)
 
 # ----------------------------------- entry -----------------------------------
 def main():
