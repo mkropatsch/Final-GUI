@@ -526,6 +526,11 @@ class SensorsTab(QWidget):
         self._log_buffer = []
         self._log_flush_count = 0
         self._alert_active = {}
+        try:
+            with open(self._log_path, "w", encoding="utf-8") as f:
+                json.dump({"session_start": self._session_start, "readings": []}, f, indent=2)
+        except Exception as e:
+            self.conn_status.setText(f"Log create error: {e}")
 
     def _is_temp_rising(self) -> bool:
         """Return True if the temperature history shows a sustained upward trend."""
@@ -645,9 +650,7 @@ class SensorsTab(QWidget):
             "alerts":     alerts,
         }
         self._log_buffer.append(reading)
-        self._log_flush_count += 1
-        if self._log_flush_count >= self._log_flush_every:
-            self._flush_log()
+        self._flush_log()
 
     def _flush_log(self, final: bool = False) -> None:
         if not self._log_path or not self._log_buffer:

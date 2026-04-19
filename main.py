@@ -31,7 +31,6 @@ from PyQt5.QtWidgets import (
     QTabBar,
     QVBoxLayout,
     QWidget,
-    QSlider,
     QPlainTextEdit,
     QStackedWidget
 )
@@ -216,7 +215,7 @@ class StageGUI2(QMainWindow):
         self.btn_connect = QPushButton("Connect")
 
         self.motion_target_combo = QComboBox()
-        self.motion_target_combo.addItems(["Needle", "Camera", "Both"])
+        self.motion_target_combo.addItems(["Both", "Needle", "Camera"])
         self.motion_target_combo.setMinimumWidth(120)
 
         self.motion_hint = QLabel("Connect to enable movement.")
@@ -230,13 +229,18 @@ class StageGUI2(QMainWindow):
         conn_top.addSpacing(10)
         conn_top.addWidget(self.btn_refresh)
         conn_top.addWidget(self.btn_connect)
-        conn_top.addStretch()
+        conn_top.addSpacing(12)
         conn_top.addWidget(self.motion_hint)
+        conn_top.addStretch()
         
         # bottom row
         conn_bottom = QGridLayout()
         conn_bottom.setHorizontalSpacing(10)
         conn_bottom.setVerticalSpacing(6)
+        conn_bottom.setColumnStretch(0, 0)
+        conn_bottom.setColumnStretch(1, 0)
+        conn_bottom.setColumnStretch(2, 0)
+        conn_bottom.setColumnStretch(3, 1)  # absorb leftover space
         
         self.needle_port_combo = QComboBox()
         self.needle_port_combo.setMinimumWidth(240)
@@ -669,16 +673,13 @@ class StageGUI2(QMainWindow):
         self.in_xy = QLineEdit("0.200")
         self.in_z = QLineEdit("0.050")
 
-        self.sld_feed = QSlider(Qt.Horizontal)
-        self.sld_feed.setRange(100, 12000)
-        self.sld_feed.setValue(3000)
-
-        self.lab_feed = QLabel("3000 mm/min")
-        self.lab_feed.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.in_feed = QLineEdit("3000")
+        self.in_feed.setFixedWidth(80)
 
         feed_row = QHBoxLayout()
-        feed_row.addWidget(self.sld_feed, 1)
-        feed_row.addWidget(self.lab_feed)
+        feed_row.addWidget(self.in_feed)
+        feed_row.addWidget(QLabel("mm/min  (100–12000)"))
+        feed_row.addStretch()
 
         self.btn_apply_steps = QPushButton("Apply Step Sizes")
         self.btn_set_home = QPushButton("Set Home")
@@ -822,10 +823,7 @@ class StageGUI2(QMainWindow):
 
         self.btn_clear_messages.clicked.connect(self.msg_box.clear)
 
-        self.sld_feed.valueChanged.connect(
-            lambda v: self.lab_feed.setText(f"{v} mm/min")
-        )
-        self.sld_feed.sliderReleased.connect(self._apply_feed_to_gantry)
+        self.in_feed.editingFinished.connect(self._apply_feed_to_gantry)
         self.btn_apply_steps.clicked.connect(self._apply_steps_to_gantry)
         self.btn_set_home.clicked.connect(self._on_set_home)
         self.btn_home.clicked.connect(self._on_home)
@@ -1576,7 +1574,7 @@ class StageGUI2(QMainWindow):
             self.btn_apply_steps, self.btn_estop,
             self.rel_x, self.rel_y, self.rel_z,
             self.abs_x, self.abs_y, self.abs_z,
-            self.in_xy, self.in_z, self.sld_feed,
+            self.in_xy, self.in_z, self.in_feed,
         ]
         for w in widgets:
             w.setEnabled(enabled)
@@ -1643,11 +1641,13 @@ class StageGUI2(QMainWindow):
         self._post_msg(f"Applied step sizes: XY={xy:.3f}, Z={z:.3f}")
 
     def _apply_feed_to_gantry(self):
+        try:
+            val = max(100, min(12000, int(self.in_feed.text().strip())))
+        except ValueError:
+            val = 3000
+        self.in_feed.setText(str(val))
         if not self._connected:
-            self._post_msg("WARNING: Not connected.")
-            QMessageBox.warning(self, "Warning", "Not connected.")
             return
-        val = int(self.sld_feed.value())
         self._send_gui_msg({"type": "set_feed", "feed_mm_min": val})
 
     def _on_home(self):
@@ -1708,7 +1708,7 @@ class StageGUI2(QMainWindow):
             "dx": dx,
             "dy": dy,
             "dz": dz,
-            "feed_mm_min": int(self.sld_feed.value()),
+            "feed_mm_min": max(100, min(12000, int(self.in_feed.text().strip() or 3000))),
         })
         
         # placeholder behavior for now
@@ -1734,7 +1734,7 @@ class StageGUI2(QMainWindow):
             "X": x,
             "Y": y,
             "Z": z,
-            "feed_mm_min": int(self.sld_feed.value()),
+            "feed_mm_min": max(100, min(12000, int(self.in_feed.text().strip() or 3000))),
         })
         
         # placehold behavior for now
@@ -1829,12 +1829,6 @@ class StageGUI2(QMainWindow):
             self.in_xy.setText(f"{float(s['xy_step']):.3f}")
         if "z_step" in s:
             self.in_z.setText(f"{float(s['z_step']):.3f}")
-        if "feed" in s:
-            val = int(s["feed"])
-            self.sld_feed.blockSignals(True)
-            self.sld_feed.setValue(val)
-            self.sld_feed.blockSignals(False)
-            self.lab_feed.setText(f"{val} mm/min")
 
     def _autopan_xy_view(self, x: float, y: float):
         vb = self.xy_plot.getViewBox()
@@ -1926,6 +1920,9 @@ class StageGUI2(QMainWindow):
             if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
                 self.microscope_tab_widget.on_camera_disconnected()
 
+            if hasattr(self, "automation_tab_widget") and self.automation_tab_widget is not None:
+                self.automation_tab_widget.update_camera_frame(None)
+
     def _on_camera_preview_changed(self, live: bool) -> None:
         self.camera_preview_live = live
 
@@ -1948,6 +1945,9 @@ class StageGUI2(QMainWindow):
 
             if hasattr(self, "microscope_tab_widget") and self.microscope_tab_widget is not None:
                 self.microscope_tab_widget.on_view_stopped()
+
+            if hasattr(self, "automation_tab_widget") and self.automation_tab_widget is not None:
+                self.automation_tab_widget.update_camera_frame(None)
 
     def _on_camera_error(self, text: str) -> None:
         self.lab_camera_status.setText("Camera error")

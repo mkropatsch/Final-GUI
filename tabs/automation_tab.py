@@ -25,6 +25,8 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
     QWidget,
+    QDialog,
+    QScrollArea,
 )
 
 
@@ -241,6 +243,31 @@ class AutomationTab(QWidget):
         right_col.setSpacing(10)
         root.addLayout(right_col, 2)
 
+        # Header row: title + instructions button
+        hdr_row = QHBoxLayout()
+        hdr_title = QLabel("Automation Controls")
+        hdr_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #d0d7e2;")
+        self.btn_routine_instructions = QPushButton("?")
+        self.btn_routine_instructions.setFixedSize(22, 22)
+        self.btn_routine_instructions.setToolTip("Routine Instructions")
+        self.btn_routine_instructions.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2f3a;
+                color: #4fc3f7;
+                border: 1px solid #4fc3f7;
+                border-radius: 11px;
+                font-weight: 700;
+                font-size: 13px;
+            }
+            QPushButton:hover { background-color: #353b48; }
+        """)
+        hdr_row.addWidget(hdr_title)
+        hdr_row.addSpacing(2)
+        hdr_row.addWidget(self.btn_routine_instructions)
+        hdr_row.addStretch()
+        right_col.addLayout(hdr_row)
+        right_col.addSpacing(2)
+
         plate_group = QGroupBox("Plate Setup")
         plate_group.setStyleSheet(
             "QGroupBox::title { font-size: 16px; font-weight: bold; color: #ffffff; padding: 0 5px; }"
@@ -402,10 +429,10 @@ class AutomationTab(QWidget):
         self._btn_calibrate.setToolTip("Open the well edge calibration dialog")
         self._btn_calibrate.clicked.connect(self.calibration_requested)
         self._lab_calibration = QLabel("Not calibrated")
-        self._lab_calibration.setStyleSheet("color: #ffaa00; font-size: 12px;")
+        self._lab_calibration.setStyleSheet("color: #ffaa00; font-size: 14px;")
 
         self.lab_home_required = QLabel("Home not set — use Set Home on Gantry tab")
-        self.lab_home_required.setStyleSheet("color: #ffaa00; font-size: 12px;")
+        self.lab_home_required.setStyleSheet("color: #ffaa00; font-size: 14px;")
 
         btn_row = QHBoxLayout()
         self.btn_start = QPushButton("Start Routine")
@@ -453,6 +480,7 @@ class AutomationTab(QWidget):
 
         right_col.addLayout(msg_top)
         right_col.addWidget(self.msg_box)
+        right_col.addStretch()
 
         self.btn_clear_messages.clicked.connect(self.msg_box.clear)
 
@@ -462,6 +490,7 @@ class AutomationTab(QWidget):
         self.spn_cols.valueChanged.connect(self._on_geometry_changed)
         self.btn_start.clicked.connect(self._on_start_clicked)
         self.btn_stop.clicked.connect(self._on_stop_clicked)
+        self.btn_routine_instructions.clicked.connect(self._show_routine_instructions)
 
     def _on_plate_changed(self, plate_name: str) -> None:
         custom = plate_name == "Custom"
@@ -520,6 +549,48 @@ class AutomationTab(QWidget):
         self.lab_status.setText("Stopped")
         self.lab_phase.setText("Phase: Stopped")
         self.stop_requested.emit()
+        
+    def _show_routine_instructions(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Automated Routine Instructions")
+        dialog.resize(700, 520)
+
+        layout = QVBoxLayout(dialog)
+
+        title = QLabel("Automated Routine Instructions")
+        title.setStyleSheet("font-size: 20px; font-weight: 700; color: white;")
+
+        text = QLabel(
+            "<b>Before Starting</b><br><br>"
+            "1. Connect the gantry system.<br>"
+            "2. Set the working home position.<br>"
+            "3. Confirm plate layout and spacing.<br>"
+            "4. Verify calibration if needed.<br><br>"
+
+            "<b>Routine Behavior</b><br><br>"
+            "• The routine moves through wells based on the layout.<br>"
+            "• Serpentine mode alternates direction each row.<br>"
+            "• Z movement and wait times are applied per well.<br><br>"
+
+            "<b>Important Notes</b><br><br>"
+            "• Do not start until home is set.<br>"
+            "• Use Stop to interrupt the routine.<br>"
+            "• Watch the status panel for progress."
+            
+            "Camera well calibration is not implemented into the routine yet, this is a preview!"
+        )
+        text.setWordWrap(True)
+        text.setTextFormat(Qt.RichText)
+        text.setStyleSheet("font-size: 15px; color: #d8e2ee;")
+
+        layout.addWidget(title)
+        layout.addWidget(text)
+
+        btn = QPushButton("Close")
+        btn.clicked.connect(dialog.close)
+        layout.addWidget(btn, alignment=Qt.AlignRight)
+
+        dialog.exec_()
         
     def _ms(self, field: QLineEdit) -> int:
         return int(field.text().strip() or 0)
