@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QDialog,
-    QScrollArea,
+    QTextEdit,
 )
 
 
@@ -46,14 +46,158 @@ PLATE_PRESETS = {
 }
 
 
+class WellInfoDialog(QDialog):
+    info_saved = pyqtSignal(str, str)  # well_name, text
+
+    def __init__(self, well_name: str, existing_text: str = "", parent=None):
+        super().__init__(parent)
+        self.well_name = well_name
+        self.setWindowTitle(f"{well_name} — Information")
+        self.resize(420, 320)
+        self.setStyleSheet("""
+            QDialog { background-color: #1a1f2b; }
+            QLabel#title {
+                color: #d8e2ee;
+                font-size: 25px;
+                font-weight: 700;
+            }
+            QTextEdit {
+                background-color: #0e1117;
+                color: #c8d0dc;
+                border: 1px solid #3a4a5e;
+                border-radius: 5px;
+                font-size: 20px;
+                padding: 6px;
+            }
+            QPushButton {
+                background-color: #2a3445;
+                color: #d0d7e2;
+                border: 1px solid #3a4a5e;
+                border-radius: 5px;
+                padding: 6px 16px;
+                font-size: 18px;
+            }
+            QPushButton:hover { background-color: #354055; }
+            QPushButton#save {
+                background-color: #1e4a2e;
+                border-color: #3a8a5e;
+                color: #aaeebb;
+            }
+            QPushButton#save:hover { background-color: #265a38; }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        title = QLabel(f"{well_name}  —  Information")
+        title.setObjectName("title")
+        layout.addWidget(title)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("color: #3a4a5e;")
+        layout.addWidget(sep)
+
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlaceholderText("No information recorded for this well.")
+        self.text_edit.setText(existing_text)
+        self.text_edit.setReadOnly(True)
+        layout.addWidget(self.text_edit, 1)
+
+        btn_row = QHBoxLayout()
+        self.btn_edit = QPushButton("Edit")
+        self.btn_save = QPushButton("Save")
+        self.btn_save.setObjectName("save")
+        self.btn_save.setVisible(False)
+        btn_close = QPushButton("Close")
+        btn_row.addWidget(self.btn_edit)
+        btn_row.addWidget(self.btn_save)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
+
+        self.btn_edit.clicked.connect(self._on_edit)
+        self.btn_save.clicked.connect(self._on_save)
+        btn_close.clicked.connect(self.close)
+
+    def _on_edit(self) -> None:
+        self.text_edit.setReadOnly(False)
+        self.text_edit.setFocus()
+        self.btn_edit.setVisible(False)
+        self.btn_save.setVisible(True)
+
+    def _on_save(self) -> None:
+        self.info_saved.emit(self.well_name, self.text_edit.toPlainText())
+        self.text_edit.setReadOnly(True)
+        self.btn_save.setVisible(False)
+        self.btn_edit.setVisible(True)
+
+
+class WellPopup(QFrame):
+    move_to_requested = pyqtSignal()
+    info_requested = pyqtSignal()
+
+    def __init__(self, well_name: str, parent=None):
+        super().__init__(parent, Qt.Popup | Qt.FramelessWindowHint)
+        self.setStyleSheet("""
+            QFrame {
+                background-color: #1e2530;
+                border: 1px solid #4fc3f7;
+                border-radius: 8px;
+            }
+            QLabel#title {
+                color: #4fc3f7;
+                font-size: 16px;
+                font-weight: 700;
+            }
+            QPushButton {
+                background-color: #2a3445;
+                color: #d0d7e2;
+                border: 1px solid #3a4a5e;
+                border-radius: 5px;
+                padding: 6px 12px;
+                font-size: 13px;
+                text-align: left;
+            }
+            QPushButton:hover { background-color: #354055; }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
+
+        title = QLabel(well_name)
+        title.setObjectName("title")
+        layout.addWidget(title)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("color: #3a4a5e;")
+        layout.addWidget(sep)
+
+        self.btn_move = QPushButton("  Move To")
+        self.btn_info = QPushButton("  Information")
+        self.btn_move.clicked.connect(self.move_to_requested)
+        self.btn_info.clicked.connect(self.info_requested)
+        layout.addWidget(self.btn_move)
+        layout.addWidget(self.btn_info)
+
+
 class WellPlatePreview(QWidget):
+    well_hovered = pyqtSignal(int, int)
+    well_unhovered = pyqtSignal()
+    well_clicked = pyqtSignal(int, int, int, int)  # row, col, global_x, global_y
+
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.rows = 4
         self.cols = 6
         self.highlight_index: tuple[int, int] | None = None
+        self.hover_index: tuple[int, int] | None = None
         self.setMinimumSize(380, 300)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMouseTracking(True)
 
     def set_plate_layout(self, rows: int, cols: int) -> None:
         self.rows = max(1, int(rows))
@@ -63,6 +207,56 @@ class WellPlatePreview(QWidget):
     def set_highlight(self, row: int | None = None, col: int | None = None) -> None:
         self.highlight_index = None if row is None or col is None else (row, col)
         self.update()
+
+    def _grid_geometry(self):
+        w, h = self.width(), self.height()
+        outer_margin = 28
+        plate_rect = QRectF(outer_margin, outer_margin,
+                            max(10, w - 2*outer_margin), max(10, h - 2*outer_margin))
+        inner_margin = 18
+        inner_rect = plate_rect.adjusted(inner_margin, inner_margin, -inner_margin, -inner_margin)
+        grid_margin = 26
+        grid_rect = inner_rect.adjusted(grid_margin, grid_margin, -grid_margin, -grid_margin)
+        step_x = grid_rect.width() / self.cols if self.cols > 0 else 1
+        step_y = grid_rect.height() / self.rows if self.rows > 0 else 1
+        diameter = min(step_x, step_y) * 0.68
+        start_x = grid_rect.left() + step_x / 2
+        start_y = grid_rect.top() + step_y / 2
+        return start_x, start_y, step_x, step_y, diameter
+
+    def _well_at(self, px: float, py: float) -> tuple[int, int] | None:
+        start_x, start_y, step_x, step_y, diameter = self._grid_geometry()
+        radius = diameter / 2
+        for r in range(self.rows):
+            for c in range(self.cols):
+                cx = start_x + c * step_x
+                cy = start_y + r * step_y
+                if (px - cx)**2 + (py - cy)**2 <= radius**2:
+                    return r, c
+        return None
+
+    def mouseMoveEvent(self, event):
+        well = self._well_at(event.x(), event.y())
+        if well != self.hover_index:
+            self.hover_index = well
+            if well is not None:
+                self.well_hovered.emit(well[0], well[1])
+            else:
+                self.well_unhovered.emit()
+            self.update()
+
+    def leaveEvent(self, _event):
+        if self.hover_index is not None:
+            self.hover_index = None
+            self.well_unhovered.emit()
+            self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            well = self._well_at(event.x(), event.y())
+            if well is not None:
+                gp = self.mapToGlobal(event.pos())
+                self.well_clicked.emit(well[0], well[1], gp.x(), gp.y())
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -126,6 +320,9 @@ class WellPlatePreview(QWidget):
                 if self.highlight_index == (r, c):
                     painter.setBrush(QBrush(highlight_fill))
                     painter.setPen(QPen(QColor("#bcecff"), 1.6))
+                elif self.hover_index == (r, c):
+                    painter.setBrush(QBrush(QColor("#2a4a5e")))
+                    painter.setPen(QPen(QColor("#4fc3f7"), 1.6))
                 else:
                     painter.setBrush(QBrush(well_fill))
                     painter.setPen(QPen(well_edge, 1.2))
@@ -147,6 +344,7 @@ class WellPlatePreview(QWidget):
             painter.drawText(QRectF(grid_rect.left() - 24, cy - 9, 18, 18), Qt.AlignCenter, chr(65 + (r % 26)))
 
 
+
 class AutomationTab(QWidget):
     update_requested = pyqtSignal(dict)
     start_requested = pyqtSignal(dict)
@@ -165,12 +363,14 @@ class AutomationTab(QWidget):
     stop_all_requested = pyqtSignal()
     cam_view_toggle_requested = pyqtSignal()
     calibration_requested = pyqtSignal()
+    move_to_well_requested = pyqtSignal(float, float)  # abs X, Y in mm
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._calib_center: tuple | None = None
         self._calib_radius: float | None = None
         self._circle_history: list = []
+        self._well_notes: dict[str, str] = {}
         self._smooth_window: int = 8
         self._build_ui()
         self._apply_plate_preset("24")
@@ -484,6 +684,7 @@ class AutomationTab(QWidget):
 
         self.btn_clear_messages.clicked.connect(self.msg_box.clear)
 
+        self.preview.well_clicked.connect(self._on_well_clicked)
         self.btn_plate_update.clicked.connect(self._on_update_clicked)
         self.cmb_plate.currentTextChanged.connect(self._on_plate_changed)
         self.spn_rows.valueChanged.connect(self._on_geometry_changed)
@@ -529,6 +730,7 @@ class AutomationTab(QWidget):
         self.preview_info.setText(f"{rows} rows × {cols} columns  •  {total} wells")
         self.lab_total.setText(str(total))
 
+
     def _on_update_clicked(self) -> None:
         plate_name = self.cmb_plate.currentText()
         if plate_name != "Custom":
@@ -549,7 +751,40 @@ class AutomationTab(QWidget):
         self.lab_status.setText("Stopped")
         self.lab_phase.setText("Phase: Stopped")
         self.stop_requested.emit()
-        
+
+    def _on_well_clicked(self, row: int, col: int, gx: int, gy: int) -> None:
+        well_name = f"{chr(65 + row)}{col + 1}"
+        popup = WellPopup(well_name, self)
+        popup.move_to_requested.connect(lambda: self._move_to_well(row, col, popup))
+        popup.info_requested.connect(lambda: self._open_well_info(row, col, popup))
+        popup.move(gx + 8, gy + 8)
+        popup.show()
+
+    def _open_well_info(self, row: int, col: int, popup: "WellPopup") -> None:
+        popup.close()
+        well_name = f"{chr(65 + row)}{col + 1}"
+        dlg = WellInfoDialog(well_name, self._well_notes.get(well_name, ""), self)
+        dlg.info_saved.connect(lambda name, text: self._save_well_note(name, text))
+        dlg.exec_()
+
+    def _save_well_note(self, well_name: str, text: str) -> None:
+        self._well_notes[well_name] = text
+        self.post_message(f"Information saved for well {well_name}.")
+
+    def _move_to_well(self, row: int, col: int, popup: "WellPopup") -> None:
+        popup.close()
+        try:
+            dx = float(self.in_dx.text().strip())
+            dy = float(self.in_dy.text().strip())
+        except ValueError:
+            self.post_message("Move To failed: ΔX / ΔY inputs are not valid numbers.")
+            return
+        well_name = f"{chr(65 + row)}{col + 1}"
+        x_mm = col * dx
+        y_mm = row * dy
+        self.post_message(f"Moving to {well_name} (X={x_mm:.2f} mm, Y={y_mm:.2f} mm)...")
+        self.move_to_well_requested.emit(x_mm, y_mm)
+
     def _show_routine_instructions(self) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle("Automated Routine Instructions")

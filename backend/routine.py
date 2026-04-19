@@ -61,7 +61,6 @@ class RoutineController(QObject):
             f"dx={self._config.dx}, dy={self._config.dy}, dz={self._config.dz}, "
             f"wait={self._config.wait_s}s, serpentine={self._config.serpentine}"
         )
-        self._emit_status("Ready", phase="Ready")
 
     def start(self, raw: Optional[dict] = None) -> None:
         if raw is not None:

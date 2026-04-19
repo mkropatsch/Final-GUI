@@ -32,7 +32,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QPlainTextEdit,
-    QStackedWidget
+    QStackedWidget,
 )
 import pyqtgraph as pg
 
@@ -104,6 +104,7 @@ class StageGUI2(QMainWindow):
         super().__init__()
         self.setWindowTitle("Auto in-vitro v3")
         self.resize(1450, 900)
+        self.setMinimumSize(1100, 700)
 
         # multiprocessing context
         self.ctx = mp.get_context("spawn")
@@ -921,6 +922,7 @@ class StageGUI2(QMainWindow):
 
         # Calibration dialog
         self.automation_tab_widget.calibration_requested.connect(self._open_calibration_dialog)
+        self.automation_tab_widget.move_to_well_requested.connect(self._on_move_to_well)
 
         self.pages.addWidget(self.gantry_page)          # index 0
         self.pages.addWidget(self.sensors_tab_widget)   # index 1
@@ -1639,6 +1641,19 @@ class StageGUI2(QMainWindow):
 
         self._send_gui_msg({"type": "set_steps", "xy_step": xy, "z_step": z, "e_step": 0.020})
         self._post_msg(f"Applied step sizes: XY={xy:.3f}, Z={z:.3f}")
+
+    def _on_move_to_well(self, x_mm: float, y_mm: float) -> None:
+        if not self._connected:
+            self.automation_tab_widget.post_message("Move To failed: gantry is not connected.")
+            return
+        self._send_gui_msg({
+            "type": "gantry_cmd",
+            "cmd": "move_abs",
+            "X": x_mm,
+            "Y": y_mm,
+            "Z": 0.0,
+            "E": 0.0,
+        })
 
     def _apply_feed_to_gantry(self):
         try:
