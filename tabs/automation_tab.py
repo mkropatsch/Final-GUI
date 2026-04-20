@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import random as _random
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 import cv2
 import numpy as np
 
-from PyQt5.QtCore import Qt, QDateTime, QRectF, pyqtSignal
+from PyQt5.QtCore import Qt, QDateTime, QRectF, QTimer, pyqtSignal
+from PyQt5.QtWidgets import QDateTimeEdit
 from PyQt5.QtGui import QColor, QFont, QPainter, QPen, QBrush, QPixmap, QImage
 from tabs.calibration_dialog import ransac_circle
 from PyQt5.QtWidgets import (
@@ -44,6 +46,156 @@ PLATE_PRESETS = {
     "96": PlatePreset("96", 8, 12),
     "Custom": PlatePreset("Custom", 4, 6),
 }
+
+
+class ScheduleManagePopup(QFrame):
+    run_now_requested = pyqtSignal()
+    edit_requested = pyqtSignal()
+    cancel_requested = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Popup | Qt.FramelessWindowHint)
+        self.setStyleSheet("""
+            QFrame {
+                background-color: #1e2530;
+                border: 1px solid #ffaa00;
+                border-radius: 8px;
+            }
+            QLabel#title { color: #ffaa00; font-size: 14px; font-weight: 700; }
+            QPushButton {
+                background-color: #2a3445;
+                color: #d0d7e2;
+                border: 1px solid #3a4a5e;
+                border-radius: 5px;
+                padding: 6px 12px;
+                font-size: 13px;
+                text-align: left;
+            }
+            QPushButton:hover { background-color: #354055; }
+            QPushButton#cancel_btn { color: #ff8888; border-color: #6a3030; }
+            QPushButton#cancel_btn:hover { background-color: #3a2020; }
+        """)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
+
+        title = QLabel("Manage Schedule")
+        title.setObjectName("title")
+        layout.addWidget(title)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("color: #3a4a5e;")
+        layout.addWidget(sep)
+
+        btn_now = QPushButton("  Run Next Pass Now")
+        btn_edit = QPushButton("  Edit Schedule")
+        btn_cancel = QPushButton("  Cancel Schedule")
+        btn_cancel.setObjectName("cancel_btn")
+
+        btn_now.clicked.connect(self.run_now_requested)
+        btn_edit.clicked.connect(self.edit_requested)
+        btn_cancel.clicked.connect(self.cancel_requested)
+
+        layout.addWidget(btn_now)
+        layout.addWidget(btn_edit)
+        layout.addWidget(btn_cancel)
+
+
+class ScheduleDialog(QDialog):
+    def __init__(self, parent=None, existing: dict | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Schedule Routine")
+        self.resize(380, 260)
+        self.setStyleSheet("""
+            QDialog { background-color: #1a1f2b; }
+            QLabel { color: #d0d7e2; font-size: 13px; }
+            QLineEdit, QDateTimeEdit {
+                background-color: #0e1117;
+                color: #c8d0dc;
+                border: 1px solid #3a4a5e;
+                border-radius: 4px;
+                padding: 4px 6px;
+                font-size: 13px;
+            }
+            QCheckBox { color: #d0d7e2; font-size: 13px; }
+            QPushButton {
+                background-color: #2a3445;
+                color: #d0d7e2;
+                border: 1px solid #3a4a5e;
+                border-radius: 5px;
+                padding: 6px 16px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background-color: #354055; }
+            QPushButton#confirm {
+                background-color: #1e3a2e;
+                border-color: #3a7a5e;
+                color: #aaddbb;
+            }
+            QPushButton#confirm:hover { background-color: #254a38; }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        form = QFormLayout()
+        form.setSpacing(10)
+
+        self.chk_now = QCheckBox("Start immediately")
+        self.chk_now.setChecked(True)
+        self.dt_start = QDateTimeEdit(QDateTime.currentDateTime())
+        self.dt_start.setDisplayFormat("yyyy-MM-dd  hh:mm")
+        self.dt_start.setCalendarPopup(True)
+        self.dt_start.setEnabled(False)
+        self.chk_now.toggled.connect(lambda checked: self.dt_start.setEnabled(not checked))
+
+        self.in_repeat = QLineEdit("0")
+        self.in_repeat.setToolTip("0 = run once, no repeat")
+
+        self.in_stop_h = QLineEdit("0")
+        self.in_stop_h.setToolTip("0 = no time limit")
+
+        self.in_stop_runs = QLineEdit("0")
+        self.in_stop_runs.setToolTip("0 = no run limit")
+
+        if existing:
+            self.chk_now.setChecked(existing.get("start_now", True))
+            self.in_repeat.setText(str(existing.get("repeat_every_h", 0)))
+            self.in_stop_h.setText(str(existing.get("stop_after_h", 0)))
+            self.in_stop_runs.setText(str(existing.get("stop_after_runs", 0)))
+
+        form.addRow(self.chk_now)
+        form.addRow("Start at", self.dt_start)
+        form.addRow("Repeat every (hours)", self.in_repeat)
+        form.addRow("Stop after (hours)", self.in_stop_h)
+        form.addRow("Stop after (runs)", self.in_stop_runs)
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        btn_confirm = QPushButton("Confirm")
+        btn_confirm.setObjectName("confirm")
+        btn_cancel = QPushButton("Cancel")
+        btn_confirm.clicked.connect(self.accept)
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_confirm)
+        btn_row.addWidget(btn_cancel)
+        layout.addLayout(btn_row)
+
+    def get_schedule(self) -> dict:
+        def _f(field, default):
+            try:
+                return max(0.0, float(field.text().strip()))
+            except ValueError:
+                return default
+        return {
+            "start_now": self.chk_now.isChecked(),
+            "start_dt": self.dt_start.dateTime().toPyDateTime(),
+            "repeat_every_h": _f(self.in_repeat, 0.0),
+            "stop_after_h": _f(self.in_stop_h, 0.0),
+            "stop_after_runs": int(_f(self.in_stop_runs, 0)),
+        }
 
 
 class WellInfoDialog(QDialog):
@@ -371,6 +523,15 @@ class AutomationTab(QWidget):
         self._calib_radius: float | None = None
         self._circle_history: list = []
         self._well_notes: dict[str, str] = {}
+        self._schedule: dict | None = None
+        self._sched_runs_done: int = 0
+        self._sched_start: datetime | None = None
+        self._sched_timer = QTimer(self)
+        self._sched_timer.setInterval(15000)  # check every 15 s
+        self._sched_timer.timeout.connect(self._check_schedule)
+        self._inter_pass_timer = QTimer(self)
+        self._inter_pass_timer.setSingleShot(True)
+        self._inter_pass_timer.timeout.connect(self._schedule_next_pass)
         self._smooth_window: int = 8
         self._build_ui()
         self._apply_plate_preset("24")
@@ -645,6 +806,15 @@ class AutomationTab(QWidget):
         btn_row.addWidget(self.btn_start)
         btn_row.addWidget(self.btn_stop)
 
+        self.btn_schedule = QPushButton("Schedule")
+        self.btn_schedule.setStyleSheet(
+            "QPushButton { background-color: #2a3a4a; color: #9aafc4;"
+            " border: 1px solid #3a5a7a; border-radius: 5px; padding: 5px 12px; font-size: 12px; }"
+            "QPushButton:hover { background-color: #354555; }"
+        )
+        self.lab_schedule = QLabel("")
+        self.lab_schedule.setStyleSheet("color: #ffaa00; font-size: 12px;")
+
         run_dur_row = QHBoxLayout()
         run_dur_row.addWidget(QLabel("Run for (min):"))
         self.in_run_duration = QLineEdit("0")
@@ -658,6 +828,8 @@ class AutomationTab(QWidget):
         status_layout.addWidget(self.lab_phase)
         status_layout.addWidget(self.lab_home_required)
         status_layout.addLayout(btn_row)
+        status_layout.addWidget(self.btn_schedule)
+        status_layout.addWidget(self.lab_schedule)
         status_layout.addLayout(run_dur_row)
         status_layout.addWidget(self._btn_calibrate)
         status_layout.addWidget(self._lab_calibration)
@@ -692,6 +864,7 @@ class AutomationTab(QWidget):
         self.btn_start.clicked.connect(self._on_start_clicked)
         self.btn_stop.clicked.connect(self._on_stop_clicked)
         self.btn_routine_instructions.clicked.connect(self._show_routine_instructions)
+        self.btn_schedule.clicked.connect(self._open_schedule_dialog)
 
     def _on_plate_changed(self, plate_name: str) -> None:
         custom = plate_name == "Custom"
@@ -751,6 +924,138 @@ class AutomationTab(QWidget):
         self.lab_status.setText("Stopped")
         self.lab_phase.setText("Phase: Stopped")
         self.stop_requested.emit()
+
+    def _open_schedule_dialog(self) -> None:
+        if self._schedule is not None:
+            popup = ScheduleManagePopup(self)
+            popup.run_now_requested.connect(lambda: self._manage_run_now(popup))
+            popup.edit_requested.connect(lambda: self._manage_edit(popup))
+            popup.cancel_requested.connect(lambda: self._manage_cancel(popup))
+            pos = self.btn_schedule.mapToGlobal(self.btn_schedule.rect().bottomLeft())
+            popup.move(pos)
+            popup.show()
+            return
+
+        dlg = ScheduleDialog(self)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        sched = dlg.get_schedule()
+        if sched["repeat_every_h"] == 0 and sched["stop_after_h"] == 0 and sched["stop_after_runs"] == 0:
+            # No repeat and no limits — just a delayed start
+            if sched["start_now"]:
+                self._run_scheduled_pass()
+                return
+
+        self._schedule = sched
+        self._sched_runs_done = 0
+        self._sched_start = datetime.now()
+        self._update_schedule_button()
+
+        if sched["start_now"]:
+            self._run_scheduled_pass()
+        else:
+            self._sched_timer.start()
+            start_str = sched["start_dt"].strftime("%Y-%m-%d %H:%M")
+            self.lab_schedule.setText(f"Scheduled: {start_str}")
+            self.post_message(f"Routine scheduled to start at {start_str}.")
+
+    def _check_schedule(self) -> None:
+        if self._schedule is None:
+            self._sched_timer.stop()
+            return
+        if datetime.now() >= self._schedule["start_dt"]:
+            self._sched_timer.stop()
+            self._run_scheduled_pass()
+
+    def _run_scheduled_pass(self) -> None:
+        self._sched_runs_done += 1
+        self.lab_schedule.setText(
+            f"Running pass {self._sched_runs_done}" +
+            (f" of {self._schedule['stop_after_runs']}" if self._schedule and self._schedule["stop_after_runs"] else "")
+            if self._schedule else ""
+        )
+        self.start_requested.emit(self.get_config())
+        self.post_message(f"Schedule: starting pass {self._sched_runs_done}.")
+
+    def _schedule_next_pass(self) -> None:
+        if self._schedule is None:
+            return
+        sched = self._schedule
+
+        runs_limit = sched["stop_after_runs"]
+        if runs_limit > 0 and self._sched_runs_done >= runs_limit:
+            self._cancel_schedule(reason="run limit reached")
+            return
+
+        if sched["stop_after_h"] > 0 and self._sched_start:
+            elapsed_h = (datetime.now() - self._sched_start).total_seconds() / 3600
+            if elapsed_h >= sched["stop_after_h"]:
+                self._cancel_schedule(reason="time limit reached")
+                return
+
+        wait_ms = int(sched["repeat_every_h"] * 3600 * 1000)
+        if wait_ms > 0:
+            self.lab_schedule.setText(
+                f"Waiting {sched['repeat_every_h']:.1f}h before next pass..."
+            )
+            self.post_message(
+                f"Schedule: pass {self._sched_runs_done} complete. "
+                f"Next pass in {sched['repeat_every_h']:.1f} hour(s)."
+            )
+            self._inter_pass_timer.start(wait_ms)
+        else:
+            self._cancel_schedule(reason="complete")
+
+    def _manage_run_now(self, popup: "ScheduleManagePopup") -> None:
+        popup.close()
+        self._inter_pass_timer.stop()
+        self._run_scheduled_pass()
+        self.post_message("Schedule: manually triggered next pass.")
+
+    def _manage_edit(self, popup: "ScheduleManagePopup") -> None:
+        popup.close()
+        dlg = ScheduleDialog(self, existing=self._schedule)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        self._schedule = dlg.get_schedule()
+        self._inter_pass_timer.stop()
+        self.post_message("Schedule updated.")
+        self._update_schedule_button()
+
+    def _manage_cancel(self, popup: "ScheduleManagePopup") -> None:
+        popup.close()
+        self._cancel_schedule("cancelled")
+
+    def _cancel_schedule(self, reason: str = "cancelled") -> None:
+        self._sched_timer.stop()
+        self._inter_pass_timer.stop()
+        self._schedule = None
+        self._sched_runs_done = 0
+        self._sched_start = None
+        self.lab_schedule.setText("")
+        self.btn_schedule.setText("Schedule")
+        self.btn_schedule.setStyleSheet(
+            "QPushButton { background-color: #2a3a4a; color: #9aafc4;"
+            " border: 1px solid #3a5a7a; border-radius: 5px; padding: 5px 12px; font-size: 12px; }"
+            "QPushButton:hover { background-color: #354555; }"
+        )
+        self.post_message(f"Schedule {reason}.")
+
+    def _update_schedule_button(self) -> None:
+        if self._schedule is not None:
+            self.btn_schedule.setText("Manage Schedule")
+            self.btn_schedule.setStyleSheet(
+                "QPushButton { background-color: #3a3010; color: #ffcc55;"
+                " border: 1px solid #ffaa00; border-radius: 5px; padding: 5px 12px; font-size: 12px; }"
+                "QPushButton:hover { background-color: #4a4020; }"
+            )
+        else:
+            self.btn_schedule.setText("Schedule")
+            self.btn_schedule.setStyleSheet(
+                "QPushButton { background-color: #2a3a4a; color: #9aafc4;"
+                " border: 1px solid #3a5a7a; border-radius: 5px; padding: 5px 12px; font-size: 12px; }"
+                "QPushButton:hover { background-color: #354555; }"
+            )
 
     def _on_well_clicked(self, row: int, col: int, gx: int, gy: int) -> None:
         well_name = f"{chr(65 + row)}{col + 1}"
@@ -860,6 +1165,9 @@ class AutomationTab(QWidget):
         self.lab_current.setText(f"Current well: {current_well or '—'}")
         self.lab_phase.setText(f"Phase: {phase or '—'}")
         self.preview.set_highlight(highlight_row, highlight_col)
+
+        if status == "Complete" and self._schedule is not None:
+            self._schedule_next_pass()
 
     def set_cam_view_state(self, camera_connected: bool, view_running: bool) -> None:
         """Update the Start/Stop View button to reflect microscope tab state."""

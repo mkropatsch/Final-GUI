@@ -339,8 +339,9 @@ class StageGUI2(QMainWindow):
         self.lab_x = QLabel("0.000")
         self.lab_y = QLabel("0.000")
         self.lab_z = QLabel("0.000")
+        self.lab_a = QLabel("0.000")
 
-        for lab in (self.lab_x, self.lab_y, self.lab_z):
+        for lab in (self.lab_x, self.lab_y, self.lab_z, self.lab_a):
             lab.setMinimumWidth(80)
             lab.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
@@ -350,8 +351,11 @@ class StageGUI2(QMainWindow):
         pos_layout.addWidget(QLabel("Y ="))
         pos_layout.addWidget(self.lab_y)
         pos_layout.addSpacing(16)
-        pos_layout.addWidget(QLabel("Z ="))
+        pos_layout.addWidget(QLabel("Z1 ="))
         pos_layout.addWidget(self.lab_z)
+        pos_layout.addSpacing(16)
+        pos_layout.addWidget(QLabel("Z2 ="))
+        pos_layout.addWidget(self.lab_a)
         pos_layout.addStretch()
 
         # Camera view
@@ -444,7 +448,8 @@ class StageGUI2(QMainWindow):
         self.btn_ul = mk("↖")
         self.btn_up = mk("↑")
         self.btn_ur = mk("↗")
-        self.btn_zp = mk("Z↑", 58, 38)
+        self.btn_zp = mk("Z1↑", 58, 38)
+        self.btn_zp2 = mk("Z2↑", 58, 38)
 
         self.btn_lf = mk("←")
         self.btn_c = mk("•")
@@ -453,12 +458,14 @@ class StageGUI2(QMainWindow):
         self.btn_dl = mk("↙")
         self.btn_dn = mk("↓")
         self.btn_dr = mk("↘")
-        self.btn_zm = mk("Z↓", 58, 38)
+        self.btn_zm = mk("Z1↓", 58, 38)
+        self.btn_zm2 = mk("Z2↓", 58, 38)
 
         mc.addWidget(self.btn_ul, 0, 0)
         mc.addWidget(self.btn_up, 0, 1)
         mc.addWidget(self.btn_ur, 0, 2)
         mc.addWidget(self.btn_zp, 0, 3)
+        mc.addWidget(self.btn_zp2, 0, 4)
 
         mc.addWidget(self.btn_lf, 1, 0)
         mc.addWidget(self.btn_c, 1, 1)
@@ -468,6 +475,7 @@ class StageGUI2(QMainWindow):
         mc.addWidget(self.btn_dn, 2, 1)
         mc.addWidget(self.btn_dr, 2, 2)
         mc.addWidget(self.btn_zm, 2, 3)
+        mc.addWidget(self.btn_zm2, 2, 4)
         
         
         # ---- Controller box ----
@@ -538,9 +546,11 @@ class StageGUI2(QMainWindow):
         self.rel_x = QLineEdit("0")
         self.rel_y = QLineEdit("0")
         self.rel_z = QLineEdit("0")
+        self.rel_z2 = QLineEdit("0")
         self.rel_x.setFixedWidth(55)
         self.rel_y.setFixedWidth(55)
         self.rel_z.setFixedWidth(55)
+        self.rel_z2.setFixedWidth(55)
 
         self.btn_rel_move = QPushButton("Move")
         self.btn_rel_move.setFixedWidth(70)
@@ -549,8 +559,10 @@ class StageGUI2(QMainWindow):
         rel_layout.addWidget(self.rel_x)
         rel_layout.addWidget(QLabel("ΔY"))
         rel_layout.addWidget(self.rel_y)
-        rel_layout.addWidget(QLabel("ΔZ"))
+        rel_layout.addWidget(QLabel("ΔZ1"))
         rel_layout.addWidget(self.rel_z)
+        rel_layout.addWidget(QLabel("ΔZ2"))
+        rel_layout.addWidget(self.rel_z2)
         rel_layout.addWidget(self.btn_rel_move)
         rel_layout.addStretch()
 
@@ -606,9 +618,11 @@ class StageGUI2(QMainWindow):
         self.abs_x = QLineEdit("0")
         self.abs_y = QLineEdit("0")
         self.abs_z = QLineEdit("0")
+        self.abs_z2 = QLineEdit("0")
         self.abs_x.setFixedWidth(55)
         self.abs_y.setFixedWidth(55)
         self.abs_z.setFixedWidth(55)
+        self.abs_z2.setFixedWidth(55)
 
         self.btn_abs_move = QPushButton("Go to")
         self.btn_abs_move.setFixedWidth(70)
@@ -617,8 +631,10 @@ class StageGUI2(QMainWindow):
         abs_layout.addWidget(self.abs_x)
         abs_layout.addWidget(QLabel("Y"))
         abs_layout.addWidget(self.abs_y)
-        abs_layout.addWidget(QLabel("Z"))
+        abs_layout.addWidget(QLabel("Z1"))
         abs_layout.addWidget(self.abs_z)
+        abs_layout.addWidget(QLabel("Z2"))
+        abs_layout.addWidget(self.abs_z2)
         abs_layout.addWidget(self.btn_abs_move)
         abs_layout.addStretch()
 
@@ -673,6 +689,7 @@ class StageGUI2(QMainWindow):
 
         self.in_xy = QLineEdit("0.200")
         self.in_z = QLineEdit("0.050")
+        self.in_z2 = QLineEdit("0.050")
 
         self.in_feed = QLineEdit("3000")
         self.in_feed.setFixedWidth(80)
@@ -752,7 +769,8 @@ class StageGUI2(QMainWindow):
         )
 
         ctrl_form.addRow("XY step (mm)", self.in_xy)
-        ctrl_form.addRow("Z step (mm)", self.in_z)
+        ctrl_form.addRow("Z1 step (mm)", self.in_z)
+        ctrl_form.addRow("Z2 step (mm)", self.in_z2)
         ctrl_form.addRow("Feed (mm/min)", feed_row)
         ctrl_form.addRow(action_row)
         ctrl_form.addRow(self.btn_estop)
@@ -1420,6 +1438,8 @@ class StageGUI2(QMainWindow):
         mk_timer("dr", lambda: self._jog_xy(+1, -1))
         mk_timer("zp", lambda: self._jog_z(+1))
         mk_timer("zm", lambda: self._jog_z(-1))
+        mk_timer("zp2", lambda: self._jog_a(+1))
+        mk_timer("zm2", lambda: self._jog_a(-1))
 
         self.btn_up.pressed.connect(self._t["up"].start)
         self.btn_up.released.connect(self._t["up"].stop)
@@ -1450,6 +1470,12 @@ class StageGUI2(QMainWindow):
 
         self.btn_zm.pressed.connect(self._t["zm"].start)
         self.btn_zm.released.connect(self._t["zm"].stop)
+
+        self.btn_zp2.pressed.connect(self._t["zp2"].start)
+        self.btn_zp2.released.connect(self._t["zp2"].stop)
+
+        self.btn_zm2.pressed.connect(self._t["zm2"].start)
+        self.btn_zm2.released.connect(self._t["zm2"].stop)
 
     def _stop_all_jog_timers(self):
         if not hasattr(self, "_t"):
@@ -1571,12 +1597,13 @@ class StageGUI2(QMainWindow):
             self.btn_lf, self.btn_c, self.btn_rt,
             self.btn_dl, self.btn_dn, self.btn_dr,
             self.btn_zp, self.btn_zm,
+            self.btn_zp2, self.btn_zm2,
             self.btn_rel_move, self.btn_abs_move,
             self.btn_set_home, self.btn_home,
             self.btn_apply_steps, self.btn_estop,
-            self.rel_x, self.rel_y, self.rel_z,
-            self.abs_x, self.abs_y, self.abs_z,
-            self.in_xy, self.in_z, self.in_feed,
+            self.rel_x, self.rel_y, self.rel_z, self.rel_z2,
+            self.abs_x, self.abs_y, self.abs_z, self.abs_z2,
+            self.in_xy, self.in_z, self.in_z2, self.in_feed,
         ]
         for w in widgets:
             w.setEnabled(enabled)
@@ -1609,13 +1636,13 @@ class StageGUI2(QMainWindow):
             self._stop_all_jog_timers()
             self._post_msg("WARNING: Not connected.")
             return
-        
+
         try:
             step = float(self.in_z.text())
         except ValueError:
-            self._post_msg("WARNING: Invalid Z step size.")
+            self._post_msg("WARNING: Invalid Z1 step size.")
             return
-        
+
         self._send_gui_msg({
             "type": "gantry_cmd",
             "cmd": "move_rel",
@@ -1623,6 +1650,28 @@ class StageGUI2(QMainWindow):
             "dy": 0.0,
             "dz": s * step,
             "de": 0.0,
+        })
+
+    def _jog_a(self, s: int):
+        if not self._connected:
+            self._stop_all_jog_timers()
+            self._post_msg("WARNING: Not connected.")
+            return
+
+        try:
+            step = float(self.in_z2.text())
+        except ValueError:
+            self._post_msg("WARNING: Invalid Z2 step size.")
+            return
+
+        self._send_gui_msg({
+            "type": "gantry_cmd",
+            "cmd": "move_rel",
+            "dx": 0.0,
+            "dy": 0.0,
+            "dz": 0.0,
+            "de": 0.0,
+            "da": s * step,
         })
 
     # -------------------------- control actions --------------------------
@@ -1635,12 +1684,13 @@ class StageGUI2(QMainWindow):
         try:
             xy = float(self.in_xy.text())
             z = float(self.in_z.text())
+            z2 = float(self.in_z2.text())
         except ValueError:
             QMessageBox.warning(self, "Invalid", "Enter numeric step sizes.")
             return
 
-        self._send_gui_msg({"type": "set_steps", "xy_step": xy, "z_step": z, "e_step": 0.020})
-        self._post_msg(f"Applied step sizes: XY={xy:.3f}, Z={z:.3f}")
+        self._send_gui_msg({"type": "set_steps", "xy_step": xy, "z_step": z, "a_step": z2, "e_step": 0.020})
+        self._post_msg(f"Applied step sizes: XY={xy:.3f}, Z1={z:.3f}, Z2={z2:.3f}")
 
     def _on_move_to_well(self, x_mm: float, y_mm: float) -> None:
         if not self._connected:
@@ -1713,21 +1763,23 @@ class StageGUI2(QMainWindow):
             dx = float(self.rel_x.text().strip() or "0")
             dy = float(self.rel_y.text().strip() or "0")
             dz = float(self.rel_z.text().strip() or "0")
+            da = float(self.rel_z2.text().strip() or "0")
         except ValueError:
             QMessageBox.warning(self, "Invalid Input", "Relative move values must be numeric.")
             return
-        
+
         self._send_gui_msg({
             "type": "gantry_cmd",
             "cmd": "move_rel",
             "dx": dx,
             "dy": dy,
             "dz": dz,
+            "de": 0.0,
+            "da": da,
             "feed_mm_min": max(100, min(12000, int(self.in_feed.text().strip() or 3000))),
         })
-        
-        # placeholder behavior for now
-        self._post_msg(f"Relative move requested: ΔX={dx:.3f}, ΔY={dy:.3f}, ΔZ={dz:.3f}")
+
+        self._post_msg(f"Relative move requested: ΔX={dx:.3f}, ΔY={dy:.3f}, ΔZ1={dz:.3f}, ΔZ2={da:.3f}")
 
     def _on_absolute_move(self):
         if not self._connected:
@@ -1739,21 +1791,22 @@ class StageGUI2(QMainWindow):
             x = float(self.abs_x.text().strip() or "0")
             y = float(self.abs_y.text().strip() or "0")
             z = float(self.abs_z.text().strip() or "0")
+            a = float(self.abs_z2.text().strip() or "0")
         except ValueError:
             QMessageBox.warning(self, "Invalid Input", "Absolute move values must be numeric.")
             return
-        
+
         self._send_gui_msg({
             "type": "gantry_cmd",
             "cmd": "move_abs",
             "X": x,
             "Y": y,
             "Z": z,
+            "A": a,
             "feed_mm_min": max(100, min(12000, int(self.in_feed.text().strip() or 3000))),
         })
-        
-        # placehold behavior for now
-        self._post_msg(f"Absolute move requested: X={x:.3f}, Y={y:.3f}, Z={z:.3f}")
+
+        self._post_msg(f"Absolute move requested: X={x:.3f}, Y={y:.3f}, Z1={z:.3f}, Z2={a:.3f}")
 
 
     # --------------------------- backend polling ---------------------------
@@ -1785,9 +1838,16 @@ class StageGUI2(QMainWindow):
                 port = msg.get("port", "unknown")
                 self._post_msg(f"ERROR: {channel} stage lost connection on {port}: {reason}")
 
-                if self.routine is not None and self.routine.is_running:
+                if self.routine is not None:
                     self.routine.stop()
-                    self._post_msg("Routine stopped due to disconnection.")
+                self._post_msg("Routine stopped due to disconnection.")
+                if hasattr(self, "automation_tab_widget"):
+                    self.automation_tab_widget.set_runtime_status(
+                        "Disconnected", current_well=None, phase="Board disconnected"
+                    )
+                    self.automation_tab_widget.post_message(
+                        f"{channel.capitalize()} stage disconnected — routine halted."
+                    )
 
                 if self._home_set:
                     self._home_set = False
@@ -1798,6 +1858,8 @@ class StageGUI2(QMainWindow):
                     self.needle_status_label.setText(label_text)
                 else:
                     self.camera_stage_status_label.setText(label_text)
+                self.motion_hint.setText("Stage disconnected")
+                self.motion_hint.setStyleSheet("color: #ff6666; font-weight: bold;")
 
                 QMessageBox.warning(
                     self,
@@ -1833,17 +1895,23 @@ class StageGUI2(QMainWindow):
             "e": float(s.get("camera_e", 0.0))
         }
 
+        aa = float(s.get("needle_a", 0.0))
+        self._needle_abs["a"] = aa
+
         self._xy_point.setData([ax], [ay])
         self._autopan_xy_view(ax, ay)
-        
+
         self.lab_x.setText(f"{ax:.3f}")
         self.lab_y.setText(f"{ay:.3f}")
         self.lab_z.setText(f"{az:.3f}")
+        self.lab_a.setText(f"{aa:.3f}")
 
         if "xy_step" in s:
             self.in_xy.setText(f"{float(s['xy_step']):.3f}")
         if "z_step" in s:
             self.in_z.setText(f"{float(s['z_step']):.3f}")
+        if "a_step" in s:
+            self.in_z2.setText(f"{float(s['a_step']):.3f}")
 
     def _autopan_xy_view(self, x: float, y: float):
         vb = self.xy_plot.getViewBox()

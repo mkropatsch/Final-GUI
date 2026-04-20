@@ -80,10 +80,41 @@ Pump commands use format `pump1/pump2/pump3/pump4` with `forward/reverse/stop`. 
 
 ## Camera
 
-- `MicroscopeTab` implements its own `cv2.VideoCapture` (default index 1); `camera.py` exists but is not currently wired in
-- `MicroscopeTab` emits `frame_ready(QPixmap)` signal; `AutomationTab` connects to it for the live feed
+- **`CameraManager`** (`backend/camera_manager.py`) is the active camera backend — wired into `main.py`. Uses `cv2.VideoCapture` with `CAP_DSHOW`, 640×480, 33 ms QTimer (~30 FPS). `camera.py` still exists but is not wired in.
+- Raw BGR frames flow: `CameraManager.frame_ready` → `StageGUI2.raw_frame_ready` (signal) → `AutomationTab.receive_raw_frame` + `MicroscopeTab.receive_frame`
+- `CameraManager` signals: `frame_ready(object)`, `camera_state_changed(bool)`, `preview_state_changed(bool)`, `error_occurred(str)`
 - Circle detection scripts in `tabs/camera_detection/` (4 variants) exist but are **not** automatically invoked by the tab UI
 - DNX64 camera light DLL path is hardcoded: `C:\Users\macke\Desktop\Project Code\camera_light_test\DNX64.dll`
+
+## Well Calibration (tabs/calibration_dialog.py)
+
+- `CalibrationDialog` is a `QDialog` that captures live frames and lets the user click to define well edge points
+- `ransac_circle(points, n_iter, inlier_thresh)` is the core fitter — picks 3 random edge points per iteration to fit a circle, tracks best inlier count
+- On `Accepted`, returns `well_center_px: tuple` and `well_radius_px: float` to `AutomationTab.set_calibration_result()`
+- Once calibrated, `AutomationTab.receive_raw_frame()` runs RANSAC live on each camera frame and overlays a smoothed circle (window=8 frames, ±25% radius tolerance)
+
+## Well Plate Map & Per-Well Notes
+
+- `WellPlatePreview` is a custom `QWidget` using `QPainter` — draws a labelled grid (row letters A–Z, column numbers) with hover and highlight states
+- Clicking a well opens `WellPopup` (frameless popup with "Move To" and "Information" options)
+- "Information" opens `WellInfoDialog` — view/edit freetext notes per well, saved in `AutomationTab._well_notes: dict[str, str]`
+- "Move To" computes `(col * dx, row * dy)` from the ΔX/ΔY inputs and emits `move_to_well_requested(float, float)` → `StageGUI2._on_move_to_well()` → absolute gantry move; requires home to be set first
+- **Set Home** dialog reminds user to center the needle on well A1 (top-left) before confirming
+
+## Routine Scheduling
+
+- `ScheduleDialog` lets users configure: start now vs. future datetime, repeat interval (hours), stop after N hours, stop after N runs
+- Active schedule stored in `AutomationTab._schedule: dict | None`; button changes to "Manage Schedule" (amber) when active
+- `_sched_timer` (15 s interval) polls for the scheduled start time; `_inter_pass_timer` (one-shot) waits between repeat passes
+- `ScheduleManagePopup` (frameless popup) offers "Run Next Pass Now", "Edit Schedule", "Cancel Schedule"
+- `set_runtime_status()` triggers `_schedule_next_pass()` automatically when status becomes `"Complete"`
+
+## Pump Control
+
+- 4 pumps exposed in `AutomationTab` "Pump Test" panel: Pumps 1 & 2 are bidirectional (forward/reverse/stop); Pumps 3 & 4 are single-direction (run/stop)
+- Duration input per pump (ms); signals relay through `StageGUI2` handlers which call `IncubatorSerial` methods: `pump1_forward`, `pump1_reverse`, `stop1`, `pump2_*`, `stop2`, `pump3_run`, `stop3`, `pump4_run`, `stop4`, `stop_all`
+- Pump operations are gated by `_pump_not_connected()` — shows a warning if `self.incubator` is not an `IncubatorSerial` instance
+- Incubator is connected via `SensorsTab.incubator_connected` signal → `_on_incubator_connected()` which also arms the routine dispense sink
 
 ## Controller Mapping
 
