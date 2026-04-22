@@ -1728,6 +1728,15 @@ class StageGUI2(QMainWindow):
         self.home_set_changed.emit(True)
         self._post_msg("Set home sent. Current position is now (0, 0, 0).")
 
+        self.lab_x.setText("0.000")
+        self.lab_y.setText("0.000")
+        self.lab_z.setText("0.000")
+        self.lab_a.setText("0.000")
+        self._xy_point.setData([0.0], [0.0])
+        offset = 10.0
+        self.xy_plot.setXRange(-offset, self._view_width - offset, padding=0)
+        self.xy_plot.setYRange(-offset, self._view_height - offset, padding=0)
+
     def _on_estop(self):
         self._stop_all_jog_timers()
         if not self._connected:
