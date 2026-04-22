@@ -74,9 +74,7 @@ The Arduino outputs one line every ~5 s matching this pattern (current firmware)
 ```
 CO2: 412 ppm | Temp: 36.85 C | RH: 72.34 % | Setpoint: 37.00 C | Heater PWM: 47
 ```
-Commands sent TO the Arduino: `FWD <ms>`, `REV <ms>`, `STOP`, `SETPOINT <temp>`
-
-Pump commands use format `pump1/pump2/pump3/pump4` with `forward/reverse/stop`. The older firmware format (which included "Error" and "Pump: STOPPED" fields) is **not** matched by the current regex.
+Commands sent TO the Arduino — see `IncubatorSerial` in `backend/incubator.py` for the exact strings (they differ from the older firmware format). The older firmware format (which included "Error" and "Pump: STOPPED" fields) is **not** matched by the current regex.
 
 ## Camera
 
@@ -111,14 +109,25 @@ Pump commands use format `pump1/pump2/pump3/pump4` with `forward/reverse/stop`. 
 
 ## Pump Control
 
-- 4 pumps exposed in `AutomationTab` "Pump Test" panel: Pumps 1 & 2 are bidirectional (forward/reverse/stop); Pumps 3 & 4 are single-direction (run/stop)
-- Duration input per pump (ms); signals relay through `StageGUI2` handlers which call `IncubatorSerial` methods: `pump1_forward`, `pump1_reverse`, `stop1`, `pump2_*`, `stop2`, `pump3_run`, `stop3`, `pump4_run`, `stop4`, `stop_all`
+- 2 pumps in `AutomationTab` "Pump Test" panel: Pump 1 is bidirectional (`pump1_forward_requested`, `pump1_reverse_requested`, `pump1_stop_requested`); Pump 2 is single-direction (`pump2_run_requested`, `pump2_stop_requested`)
+- Duration input per pump (ms); signals relay through `StageGUI2` handlers → `IncubatorSerial` methods: `pump1_forward(ms)`, `pump1_reverse(ms)`, `stop1()`, `pump2_run(ms)`, `stop2()`, `stop_all()`
+- Actual Arduino wire protocol: `pump1 forward <ms>`, `pump1 reverse <ms>`, `stop1`, `pump2 <ms>`, `stop2`, `stopall`, `setpoint <temp>`
 - Pump operations are gated by `_pump_not_connected()` — shows a warning if `self.incubator` is not an `IncubatorSerial` instance
 - Incubator is connected via `SensorsTab.incubator_connected` signal → `_on_incubator_connected()` which also arms the routine dispense sink
+
+## Guided Tour & Help Panel
+
+- `GuideWindow` (`tabs/guide_panel.py`) is a `QDialog` docked as a floating panel — contains collapsible section cards (HTML body) describing each feature area. Opened via the help button in `StageGUI2`.
+- `GuidedTour` (`tabs/guided_tour.py`) overlays a `TourHighlight` (semi-transparent border widget) and `TourPopup` (step dialog) on the main window. Steps are a list of `(widget_ref, title, text)` tuples defined in `GuidedTour.__init__`. `start()` / `next_step()` / `prev_step()` / `finish()` drive the sequence.
+- Both are instantiated in `StageGUI2.__init__` and wired to the guide button via `guide_window.btn_start_tour.clicked`.
 
 ## Controller Mapping
 
 Xbox controller actions stored in `backend/config/controller_map.json` (auto-created on first run). Default: left stick → XY, right stick → Z, triggers → E, face buttons → step size. Deadzone: 0.20. Button presses are debounced via `_last_button_time`.
+
+## Main Window (`StageGUI2`)
+
+The top-level `QMainWindow` subclass is `StageGUI2` (in `main.py`). It owns the gantry `mp.Process`, the `IncubatorSerial` thread, `CameraManager`, `RoutineController`, and all tab widgets. Signal wiring between tabs and backend components all lives in `StageGUI2`.
 
 ## UI / Styling
 

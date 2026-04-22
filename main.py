@@ -898,7 +898,7 @@ class StageGUI2(QMainWindow):
         
         self.routine = RoutineController(
             command_sink=self._send_gui_msg,
-            dispense_sink=self.incubator.pump_forward if self.incubator else None,
+            dispense_sink=None,
             parent=self,
         )
         self.sensors_tab_widget.incubator_connected.connect(self._on_incubator_connected)
@@ -909,18 +909,13 @@ class StageGUI2(QMainWindow):
         
         # automation tab -> routine backend
         self.automation_tab_widget.update_requested.connect(self.routine.update_config)
-        self.automation_tab_widget.start_requested.connect(self.routine.start)
+        self.automation_tab_widget.start_requested.connect(self._on_routine_start_requested)
         self.automation_tab_widget.stop_requested.connect(self.routine.stop)
         self.automation_tab_widget.pump1_forward_requested.connect(self._on_pump1_forward)
         self.automation_tab_widget.pump1_reverse_requested.connect(self._on_pump1_reverse)
         self.automation_tab_widget.pump1_stop_requested.connect(self._on_pump1_stop)
-        self.automation_tab_widget.pump2_forward_requested.connect(self._on_pump2_forward)
-        self.automation_tab_widget.pump2_reverse_requested.connect(self._on_pump2_reverse)
+        self.automation_tab_widget.pump2_run_requested.connect(self._on_pump2_run)
         self.automation_tab_widget.pump2_stop_requested.connect(self._on_pump2_stop)
-        self.automation_tab_widget.pump3_requested.connect(self._on_pump3_run)
-        self.automation_tab_widget.pump3_stop_requested.connect(self._on_pump3_stop)
-        self.automation_tab_widget.pump4_requested.connect(self._on_pump4_run)
-        self.automation_tab_widget.pump4_stop_requested.connect(self._on_pump4_stop)
         self.automation_tab_widget.stop_all_requested.connect(self._on_stop_all_pumps)
 
         # Push raw frames to automation tab for live edge detection
@@ -1505,8 +1500,7 @@ class StageGUI2(QMainWindow):
             
     def _on_incubator_connected(self, incubator: IncubatorSerial) -> None:
         self.incubator = incubator
-        self.routine._dispense = incubator.pump_forward
-        self._post_msg("Incubator connected — pump armed for routine.")
+        self._post_msg("Incubator connected.")
     
     def _pump_not_connected(self) -> bool:
         """Returns True and shows warning if incubator board is not connected."""
@@ -1517,6 +1511,21 @@ class StageGUI2(QMainWindow):
             QMessageBox.warning(self, "Not Connected", msg)
             return True
         return False
+
+    def _on_routine_start_requested(self, config: dict) -> None:
+        if self.incubator is not None:
+            pump = config.get("pump_select", "none")
+            if pump == "pump1_fwd":
+                self.routine._dispense = self.incubator.pump1_forward
+            elif pump == "pump1_rev":
+                self.routine._dispense = self.incubator.pump1_reverse
+            elif pump == "pump2":
+                self.routine._dispense = self.incubator.pump2_run
+            else:
+                self.routine._dispense = None
+        else:
+            self.routine._dispense = None
+        self.routine.start(config)
 
     def _on_pump1_forward(self, duration_ms: int) -> None:
         if self._pump_not_connected(): return
@@ -1533,40 +1542,15 @@ class StageGUI2(QMainWindow):
         self.incubator.stop1()
         self.automation_tab_widget.post_message("Pump 1 stopped.")
 
-    def _on_pump2_forward(self, duration_ms: int) -> None:
+    def _on_pump2_run(self, duration_ms: int) -> None:
         if self._pump_not_connected(): return
-        self.incubator.pump2_forward(duration_ms)
-        self.automation_tab_widget.post_message(f"Pump 2 forward: {duration_ms} ms")
-
-    def _on_pump2_reverse(self, duration_ms: int) -> None:
-        if self._pump_not_connected(): return
-        self.incubator.pump2_reverse(duration_ms)
-        self.automation_tab_widget.post_message(f"Pump 2 reverse: {duration_ms} ms")
+        self.incubator.pump2_run(duration_ms)
+        self.automation_tab_widget.post_message(f"Pump 2 run: {duration_ms} ms")
 
     def _on_pump2_stop(self) -> None:
         if self._pump_not_connected(): return
         self.incubator.stop2()
         self.automation_tab_widget.post_message("Pump 2 stopped.")
-
-    def _on_pump3_run(self, duration_ms: int) -> None:
-        if self._pump_not_connected(): return
-        self.incubator.pump3_run(duration_ms)
-        self.automation_tab_widget.post_message(f"Pump 3 run: {duration_ms} ms")
-
-    def _on_pump3_stop(self) -> None:
-        if self._pump_not_connected(): return
-        self.incubator.stop3()
-        self.automation_tab_widget.post_message("Pump 3 stopped.")
-
-    def _on_pump4_run(self, duration_ms: int) -> None:
-        if self._pump_not_connected(): return
-        self.incubator.pump4_run(duration_ms)
-        self.automation_tab_widget.post_message(f"Pump 4 run: {duration_ms} ms")
-
-    def _on_pump4_stop(self) -> None:
-        if self._pump_not_connected(): return
-        self.incubator.stop4()
-        self.automation_tab_widget.post_message("Pump 4 stopped.")
 
     def _on_stop_all_pumps(self) -> None:
         if self._pump_not_connected(): return

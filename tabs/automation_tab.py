@@ -501,17 +501,12 @@ class AutomationTab(QWidget):
     update_requested = pyqtSignal(dict)
     start_requested = pyqtSignal(dict)
     stop_requested = pyqtSignal()
-    # Pump 1 & 2 are bidirectional; Pump 3 & 4 are single direction
+    # Pump 1 is bidirectional; Pump 2 is single direction
     pump1_forward_requested = pyqtSignal(int)
     pump1_reverse_requested = pyqtSignal(int)
     pump1_stop_requested = pyqtSignal()
-    pump2_forward_requested = pyqtSignal(int)
-    pump2_reverse_requested = pyqtSignal(int)
+    pump2_run_requested = pyqtSignal(int)
     pump2_stop_requested = pyqtSignal()
-    pump3_requested = pyqtSignal(int)
-    pump3_stop_requested = pyqtSignal()
-    pump4_requested = pyqtSignal(int)
-    pump4_stop_requested = pyqtSignal()
     stop_all_requested = pyqtSignal()
     cam_view_toggle_requested = pyqtSignal()
     calibration_requested = pyqtSignal()
@@ -683,11 +678,23 @@ class AutomationTab(QWidget):
         self.chk_serpentine = QCheckBox("Serpentine")
         self.chk_serpentine.setChecked(True)
 
+        self.cmb_dispense_pump = QComboBox()
+        self.cmb_dispense_pump.addItem("None", "none")
+        self.cmb_dispense_pump.addItem("Pump 1 Forward", "pump1_fwd")
+        self.cmb_dispense_pump.addItem("Pump 1 Reverse", "pump1_rev")
+        self.cmb_dispense_pump.addItem("Pump 2", "pump2")
+
+        self.in_dispense_ms = QLineEdit("0")
+        self.in_dispense_ms.setPlaceholderText("ms")
+        self.in_dispense_ms.setToolTip("Duration in ms the pump runs at each well (0 = no dispense)")
+
         auto_form.addRow("ΔX", self.in_dx)
         auto_form.addRow("ΔY", self.in_dy)
         auto_form.addRow("ΔZ", self.in_dz)
         auto_form.addRow("Wait (s)", self.in_wait)
         auto_form.addRow(self.chk_serpentine)
+        auto_form.addRow("Dispense pump", self.cmb_dispense_pump)
+        auto_form.addRow("Dispense (ms)", self.in_dispense_ms)
 
         right_col.addWidget(auto_group)
         
@@ -717,50 +724,19 @@ class AutomationTab(QWidget):
         p1_row.addWidget(self.btn_pump1_stop)
         pump_form.addRow("Pump 1", p1_row)
 
-        # Pump 2 — bidirectional
+        # Pump 2 — single direction
         self.in_pump2_ms = QLineEdit("1000")
         self.in_pump2_ms.setPlaceholderText("ms")
         p2_row = QHBoxLayout()
-        self.btn_pump2_fwd = QPushButton("Forward")
-        self.btn_pump2_rev = QPushButton("Reverse")
+        self.btn_pump2_run = QPushButton("Run")
         self.btn_pump2_stop = QPushButton("Stop")
         self.btn_pump2_stop.setStyleSheet(stop_style)
-        self.btn_pump2_fwd.clicked.connect(self._on_pump2_forward)
-        self.btn_pump2_rev.clicked.connect(self._on_pump2_reverse)
+        self.btn_pump2_run.clicked.connect(self._on_pump2_run)
         self.btn_pump2_stop.clicked.connect(self.pump2_stop_requested)
         p2_row.addWidget(self.in_pump2_ms)
-        p2_row.addWidget(self.btn_pump2_fwd)
-        p2_row.addWidget(self.btn_pump2_rev)
+        p2_row.addWidget(self.btn_pump2_run)
         p2_row.addWidget(self.btn_pump2_stop)
         pump_form.addRow("Pump 2", p2_row)
-
-        # Pump 3 — single direction
-        self.in_pump3_ms = QLineEdit("1000")
-        self.in_pump3_ms.setPlaceholderText("ms")
-        p3_row = QHBoxLayout()
-        self.btn_pump3_run = QPushButton("Run")
-        self.btn_pump3_stop = QPushButton("Stop")
-        self.btn_pump3_stop.setStyleSheet(stop_style)
-        self.btn_pump3_run.clicked.connect(self._on_pump3_run)
-        self.btn_pump3_stop.clicked.connect(self.pump3_stop_requested)
-        p3_row.addWidget(self.in_pump3_ms)
-        p3_row.addWidget(self.btn_pump3_run)
-        p3_row.addWidget(self.btn_pump3_stop)
-        pump_form.addRow("Pump 3", p3_row)
-
-        # Pump 4 — single direction
-        self.in_pump4_ms = QLineEdit("1000")
-        self.in_pump4_ms.setPlaceholderText("ms")
-        p4_row = QHBoxLayout()
-        self.btn_pump4_run = QPushButton("Run")
-        self.btn_pump4_stop = QPushButton("Stop")
-        self.btn_pump4_stop.setStyleSheet(stop_style)
-        self.btn_pump4_run.clicked.connect(self._on_pump4_run)
-        self.btn_pump4_stop.clicked.connect(self.pump4_stop_requested)
-        p4_row.addWidget(self.in_pump4_ms)
-        p4_row.addWidget(self.btn_pump4_run)
-        p4_row.addWidget(self.btn_pump4_stop)
-        pump_form.addRow("Pump 4", p4_row)
 
         self.btn_stop_all = QPushButton("Stop All Pumps")
         self.btn_stop_all.setStyleSheet(stop_style)
@@ -876,6 +852,10 @@ class AutomationTab(QWidget):
 
     def _apply_plate_preset(self, plate_name: str) -> None:
         preset = PLATE_PRESETS.get(plate_name, PLATE_PRESETS["24"])
+
+        self.cmb_plate.blockSignals(True)
+        self.cmb_plate.setCurrentText(plate_name)
+        self.cmb_plate.blockSignals(False)
 
         self.spn_rows.blockSignals(True)
         self.spn_cols.blockSignals(True)
@@ -1141,17 +1121,8 @@ class AutomationTab(QWidget):
     def _on_pump1_reverse(self) -> None:
         self.pump1_reverse_requested.emit(self._ms(self.in_pump1_ms))
 
-    def _on_pump2_forward(self) -> None:
-        self.pump2_forward_requested.emit(self._ms(self.in_pump2_ms))
-
-    def _on_pump2_reverse(self) -> None:
-        self.pump2_reverse_requested.emit(self._ms(self.in_pump2_ms))
-
-    def _on_pump3_run(self) -> None:
-        self.pump3_requested.emit(self._ms(self.in_pump3_ms))
-
-    def _on_pump4_run(self) -> None:
-        self.pump4_requested.emit(self._ms(self.in_pump4_ms))
+    def _on_pump2_run(self) -> None:
+        self.pump2_run_requested.emit(self._ms(self.in_pump2_ms))
 
     def set_runtime_status(
         self,
@@ -1270,6 +1241,10 @@ class AutomationTab(QWidget):
             run_min = float(self.in_run_duration.text().strip())
         except ValueError:
             run_min = 0.0
+        try:
+            dispense_ms = int(self.in_dispense_ms.text().strip() or 0)
+        except ValueError:
+            dispense_ms = 0
         return {
             "plate_type": self.cmb_plate.currentText(),
             "rows": self.spn_rows.value(),
@@ -1280,6 +1255,8 @@ class AutomationTab(QWidget):
             "wait_s": self.in_wait.text().strip(),
             "serpentine": self.chk_serpentine.isChecked(),
             "total_run_s": run_min * 60.0,
+            "pump_select": self.cmb_dispense_pump.currentData(),
+            "dispense_ms": dispense_ms,
         }
 
 

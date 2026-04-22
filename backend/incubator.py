@@ -9,20 +9,11 @@ from __future__ import annotations
 # Commands we send TO the Arduino (all lowercase — Arduino calls cmd.toLowerCase()):
 #   pump1 forward <ms>   — run pump 1 forward for <ms> milliseconds
 #   pump1 reverse <ms>   — run pump 1 reverse for <ms> milliseconds
-#   pump2 forward <ms>   — run pump 2 forward for <ms> milliseconds
-#   pump2 reverse <ms>   — run pump 2 reverse for <ms> milliseconds
-#   pump3 <ms>           — run pump 3 for <ms> milliseconds (one direction only)
-#   pump4 <ms>           — run pump 4 for <ms> milliseconds (one direction only)
 #   stop1                — stop pump 1
+#   pump2 <ms>           — run pump 2 for <ms> milliseconds (single direction)
 #   stop2                — stop pump 2
-#   stop3                — stop pump 3
-#   stop4                — stop pump 4
 #   stopall              — stop all pumps
 #   setpoint <temp>      — update heater target temperature
-#
-# TODO: wire pump commands into the routine (RoutineController._dispense).
-#       Decide which pump(s) the routine should trigger at each well and
-#       whether a reverse/aspirate step is needed after dispensing.
 
 import queue
 import re
@@ -94,29 +85,12 @@ class IncubatorSerial(threading.Thread):
     def stop1(self) -> None:
         self.send_command("stop1")
 
-    # ---- Pump 2 (bidirectional H-bridge) ----
-    def pump2_forward(self, duration_ms: int) -> None:
-        self.send_command(f"pump2 forward {int(duration_ms)}")
-
-    def pump2_reverse(self, duration_ms: int) -> None:
-        self.send_command(f"pump2 reverse {int(duration_ms)}")
+    # ---- Pump 2 (single direction) ----
+    def pump2_run(self, duration_ms: int) -> None:
+        self.send_command(f"pump2 {int(duration_ms)}")
 
     def stop2(self) -> None:
         self.send_command("stop2")
-
-    # ---- Pump 3 (single direction) ----
-    def pump3_run(self, duration_ms: int) -> None:
-        self.send_command(f"pump3 {int(duration_ms)}")
-
-    def stop3(self) -> None:
-        self.send_command("stop3")
-
-    # ---- Pump 4 (single direction) ----
-    def pump4_run(self, duration_ms: int) -> None:
-        self.send_command(f"pump4 {int(duration_ms)}")
-
-    def stop4(self) -> None:
-        self.send_command("stop4")
 
     # ---- All pumps ----
     def stop_all(self) -> None:

@@ -175,7 +175,16 @@ class StepperControlBoard: # class (unlike dataclass) can have behavior function
             out.extend(self._read_available_lines())
             time.sleep(0.01)
         return out
-    ## END new message reply
+
+    def wait_for_ok(self, timeout_s: float = 60.0) -> bool:
+        """Block until the board sends an 'ok' line or timeout_s elapses. Returns True if ok received."""
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < timeout_s:
+            for line in self._read_available_lines():
+                if line.strip().lower().startswith("ok"):
+                    return True
+            time.sleep(0.01)
+        return False
 
 
     def quick_stop(self):
@@ -294,6 +303,10 @@ class StepperControlBoardSimulator: #pretend machine if board isn't connected
 
 # ------- Same as before, currently does nothing (Fix) ------ (but _publish_state still reads position from simulator object)
 # Doesn't matter as much because no board is connected
+    def wait_for_ok(self, timeout_s: float = 60.0) -> bool:
+        self._log("M400 (simulated ok)")
+        return True
+
     def request_data(self): pass
 
 
@@ -451,8 +464,12 @@ class GantrySystem:  # basically the manager
                                         self._flush_motion(ch)
                                     except Exception:
                                         pass
-
-                                if hasattr(board, "send_gcode_with_reply"):
+                                    board.send_gcode(cmd)
+                                    if hasattr(board, "wait_for_ok"):
+                                        ok = board.wait_for_ok(timeout_s=60.0)
+                                        if not ok:
+                                            self._send_message("warning", f"{ch.name.capitalize()} M400 timed out — motion may not have finished.")
+                                elif hasattr(board, "send_gcode_with_reply"):
                                     replies = board.send_gcode_with_reply(cmd, wait_s=0.8)
                                     for line in replies:
                                         self._send_message("info", f"[{ch.name.upper()} GCODE] {line}")
