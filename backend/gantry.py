@@ -75,6 +75,11 @@ class MotionChannel:
     da: float = 0.0
     connected: bool = False
     port: str | None = None
+    flip_x: float = +1.0
+    flip_y: float = -1.0
+    flip_z: float = -1.0
+    flip_a: float = -1.0
+    flip_e: float = +1.0
 
 # --------------------------- hardware backends --------------------------------
 
@@ -360,6 +365,7 @@ class GantrySystem:  # basically the manager
                 name="needle",
                 state=GantryState(steps=self.steps, feed=self.feed),
                 port=self._ports.get("needle"),
+                flip_x=-1.0,
             ),
             "camera": MotionChannel(
                 name="camera",
@@ -570,11 +576,11 @@ class GantrySystem:  # basically the manager
                                 ch.state.feed = self.feed
 
                         for ch in targets:
-                            ch.dx += self.flip_x * dx
-                            ch.dy += self.flip_y * dy
-                            ch.dz += self.flip_z * dz
-                            ch.de += self.flip_e * de
-                            ch.da += self.flip_a * da
+                            ch.dx += ch.flip_x * dx
+                            ch.dy += ch.flip_y * dy
+                            ch.dz += ch.flip_z * dz
+                            ch.de += ch.flip_e * de
+                            ch.da += ch.flip_a * da
 
                         self._send_message(
                             "info",
@@ -623,8 +629,8 @@ class GantrySystem:  # basically the manager
                         dy = float(ny) * self.steps.xy_step
 
                         for ch in targets:
-                            ch.dx += self.flip_x * dx
-                            ch.dy += self.flip_y * dy
+                            ch.dx += ch.flip_x * dx
+                            ch.dy += ch.flip_y * dy
 
                         self._send_message(
                             "info",
@@ -678,16 +684,16 @@ class GantrySystem:  # basically the manager
 
                 if cmd == "xy_motion" and isinstance(val, (tuple, list)) and len(val) == 2:
                     jx, jy = float(val[0]), float(val[1])
-                    needle.dx += self.flip_x * (jx * self.steps.xy_step)
-                    needle.dy += self.flip_y * (jy * self.steps.xy_step)
+                    needle.dx += needle.flip_x * (jx * self.steps.xy_step)
+                    needle.dy += needle.flip_y * (jy * self.steps.xy_step)
 
                 elif cmd == "z_motion" and isinstance(val, (tuple, list)) and len(val) == 2:
                     _jx, jy = float(val[0]), float(val[1])
-                    needle.dz += self.flip_z * (jy * self.steps.z_step)
+                    needle.dz += needle.flip_z * (jy * self.steps.z_step)
 
                 elif cmd == "e_motion" and isinstance(val, (tuple, list)) and len(val) == 2:
                     lt, rt = float(val[0]), float(val[1])
-                    needle.de += self.flip_e * ((rt - lt) * self.steps.e_step)
+                    needle.de += needle.flip_e * ((rt - lt) * self.steps.e_step)
 
                 elif cmd == "xy_step_size_inc":
                     self.steps.xy_step = min(self.steps.xy_step + 0.05, 5.0)
@@ -771,18 +777,18 @@ class GantrySystem:  # basically the manager
         camera = self.channels["camera"]
 
         if needle.board is not None:
-            needle.state.x = getattr(needle.board, "x", 0.0)
-            needle.state.y = getattr(needle.board, "y", 0.0)
-            needle.state.z = getattr(needle.board, "z", 0.0)
-            needle.state.e = getattr(needle.board, "e", 0.0)
-            needle.state.a = getattr(needle.board, "a", 0.0)
+            needle.state.x = getattr(needle.board, "x", 0.0) * needle.flip_x
+            needle.state.y = getattr(needle.board, "y", 0.0) * needle.flip_y
+            needle.state.z = getattr(needle.board, "z", 0.0) * needle.flip_z
+            needle.state.e = getattr(needle.board, "e", 0.0) * needle.flip_e
+            needle.state.a = getattr(needle.board, "a", 0.0) * needle.flip_a
 
         if camera.board is not None:
-            camera.state.x = getattr(camera.board, "x", 0.0)
-            camera.state.y = getattr(camera.board, "y", 0.0)
-            camera.state.z = getattr(camera.board, "z", 0.0)
-            camera.state.e = getattr(camera.board, "e", 0.0)
-            camera.state.a = getattr(camera.board, "a", 0.0)
+            camera.state.x = getattr(camera.board, "x", 0.0) * camera.flip_x
+            camera.state.y = getattr(camera.board, "y", 0.0) * camera.flip_y
+            camera.state.z = getattr(camera.board, "z", 0.0) * camera.flip_z
+            camera.state.e = getattr(camera.board, "e", 0.0) * camera.flip_e
+            camera.state.a = getattr(camera.board, "a", 0.0) * camera.flip_a
 
         # Keep old top-level values for compatibility
         self.state.x = needle.state.x

@@ -898,6 +898,7 @@ class StageGUI2(QMainWindow):
         
         self.routine = RoutineController(
             command_sink=self._send_gui_msg,
+            aspirate_sink=None,
             dispense_sink=None,
             parent=self,
         )
@@ -1513,17 +1514,11 @@ class StageGUI2(QMainWindow):
         return False
 
     def _on_routine_start_requested(self, config: dict) -> None:
-        if self.incubator is not None:
-            pump = config.get("pump_select", "none")
-            if pump == "pump1_fwd":
-                self.routine._dispense = self.incubator.pump1_forward
-            elif pump == "pump1_rev":
-                self.routine._dispense = self.incubator.pump1_reverse
-            elif pump == "pump2":
-                self.routine._dispense = self.incubator.pump2_run
-            else:
-                self.routine._dispense = None
+        if self.incubator is not None and config.get("mode") == "pump":
+            self.routine._aspirate = self.incubator.pump1_reverse   # Z2 — bidirectional
+            self.routine._dispense = self.incubator.pump2_run        # Z1 — single direction
         else:
+            self.routine._aspirate = None
             self.routine._dispense = None
         self.routine.start(config)
 

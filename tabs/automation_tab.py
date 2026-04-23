@@ -200,12 +200,13 @@ class ScheduleDialog(QDialog):
 
 class WellInfoDialog(QDialog):
     info_saved = pyqtSignal(str, str)  # well_name, text
+    move_to_requested = pyqtSignal()
 
     def __init__(self, well_name: str, existing_text: str = "", parent=None):
         super().__init__(parent)
         self.well_name = well_name
         self.setWindowTitle(f"{well_name} — Information")
-        self.resize(420, 320)
+        self.resize(420, 340)
         self.setStyleSheet("""
             QDialog { background-color: #1a1f2b; }
             QLabel#title {
@@ -236,15 +237,33 @@ class WellInfoDialog(QDialog):
                 color: #aaeebb;
             }
             QPushButton#save:hover { background-color: #265a38; }
+            QPushButton#move {
+                background-color: #1e3a4a;
+                border-color: #3a7a9e;
+                color: #aaddee;
+            }
+            QPushButton#move:hover { background-color: #264a5a; }
+            QPushButton#clear {
+                background-color: #4a1e1e;
+                border-color: #9e3a3a;
+                color: #eeaaaa;
+            }
+            QPushButton#clear:hover { background-color: #5a2626; }
         """)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(10)
 
+        title_row = QHBoxLayout()
         title = QLabel(f"{well_name}  —  Information")
         title.setObjectName("title")
-        layout.addWidget(title)
+        btn_move = QPushButton("Move To")
+        btn_move.setObjectName("move")
+        title_row.addWidget(title)
+        title_row.addStretch()
+        title_row.addWidget(btn_move)
+        layout.addLayout(title_row)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
@@ -262,15 +281,22 @@ class WellInfoDialog(QDialog):
         self.btn_save = QPushButton("Save")
         self.btn_save.setObjectName("save")
         self.btn_save.setVisible(False)
+        btn_clear = QPushButton("Clear")
+        btn_clear.setObjectName("clear")
         btn_close = QPushButton("Close")
+
         btn_row.addWidget(self.btn_edit)
         btn_row.addWidget(self.btn_save)
+        btn_row.addWidget(btn_clear)
         btn_row.addStretch()
         btn_row.addWidget(btn_close)
         layout.addLayout(btn_row)
 
         self.btn_edit.clicked.connect(self._on_edit)
         self.btn_save.clicked.connect(self._on_save)
+        btn_clear.clicked.connect(self._on_clear)
+        btn_move.clicked.connect(self.move_to_requested)
+        btn_move.clicked.connect(self.close)
         btn_close.clicked.connect(self.close)
 
     def _on_edit(self) -> None:
@@ -281,6 +307,14 @@ class WellInfoDialog(QDialog):
 
     def _on_save(self) -> None:
         self.info_saved.emit(self.well_name, self.text_edit.toPlainText())
+        self.text_edit.setReadOnly(True)
+        self.btn_save.setVisible(False)
+        self.btn_edit.setVisible(True)
+
+    def _on_clear(self) -> None:
+        self.text_edit.setReadOnly(False)
+        self.text_edit.clear()
+        self.info_saved.emit(self.well_name, "")
         self.text_edit.setReadOnly(True)
         self.btn_save.setVisible(False)
         self.btn_edit.setVisible(True)
@@ -481,6 +515,14 @@ class WellPlatePreview(QWidget):
 
                 painter.drawEllipse(well_rect)
 
+                if self.hover_index == (r, c):
+                    name_font = QFont()
+                    name_font.setPointSize(max(6, int(diameter * 0.22)))
+                    name_font.setBold(True)
+                    painter.setFont(name_font)
+                    painter.setPen(QPen(QColor("#ffffff")))
+                    painter.drawText(well_rect, Qt.AlignCenter, f"{chr(65 + r)}{c + 1}")
+
         # small row/column labels
         label_font = QFont()
         label_font.setPointSize(10)
@@ -668,33 +710,51 @@ class AutomationTab(QWidget):
         self.in_dx = QLineEdit()
         self.in_dy = QLineEdit()
         self.in_dz = QLineEdit()
-        self.in_wait = QLineEdit()
 
-        self.in_dx.setPlaceholderText("ΔX")
-        self.in_dy.setPlaceholderText("ΔY")
-        self.in_dz.setPlaceholderText("ΔZ")
-        self.in_wait.setPlaceholderText("Wait time")
+        self.in_dx.setPlaceholderText("ΔX mm")
+        self.in_dy.setPlaceholderText("ΔY mm")
+        self.in_dz.setPlaceholderText("ΔZ mm")
 
         self.chk_serpentine = QCheckBox("Serpentine")
         self.chk_serpentine.setChecked(True)
 
-        self.cmb_dispense_pump = QComboBox()
-        self.cmb_dispense_pump.addItem("None", "none")
-        self.cmb_dispense_pump.addItem("Pump 1 Forward", "pump1_fwd")
-        self.cmb_dispense_pump.addItem("Pump 1 Reverse", "pump1_rev")
-        self.cmb_dispense_pump.addItem("Pump 2", "pump2")
+        self.cmb_mode = QComboBox()
+        self.cmb_mode.addItem("Demo (no pumps)", "demo")
+        self.cmb_mode.addItem("Pump (aspirate + dispense)", "pump")
+        self.cmb_mode.setToolTip(
+            "Demo: gantry movement only, no pumps fire.\n"
+            "Pump: Z2 aspirates (Pump 1 reverse), Z1 dispenses (Pump 2)."
+        )
+
+        self.in_aspirate_ms = QLineEdit("0")
+        self.in_aspirate_ms.setPlaceholderText("ms")
+        self.in_aspirate_ms.setToolTip("Z2 needle — Pump 1 reverse duration per well (0 = skip)")
 
         self.in_dispense_ms = QLineEdit("0")
         self.in_dispense_ms.setPlaceholderText("ms")
-        self.in_dispense_ms.setToolTip("Duration in ms the pump runs at each well (0 = no dispense)")
+        self.in_dispense_ms.setToolTip("Z1 needle — Pump 2 duration per well (0 = skip)")
 
-        auto_form.addRow("ΔX", self.in_dx)
-        auto_form.addRow("ΔY", self.in_dy)
-        auto_form.addRow("ΔZ", self.in_dz)
-        auto_form.addRow("Wait (s)", self.in_wait)
+        self.in_settle_ms = QLineEdit("300")
+        self.in_settle_ms.setPlaceholderText("ms")
+        self.in_settle_ms.setToolTip("Extra wait after pump finishes before lifting the needle (ms)")
+
+        def _update_pump_fields(_idx):
+            pump_mode = self.cmb_mode.currentData() == "pump"
+            self.in_aspirate_ms.setEnabled(pump_mode)
+            self.in_dispense_ms.setEnabled(pump_mode)
+            self.in_settle_ms.setEnabled(pump_mode)
+
+        self.cmb_mode.currentIndexChanged.connect(_update_pump_fields)
+        _update_pump_fields(0)
+
+        auto_form.addRow("ΔX (mm)", self.in_dx)
+        auto_form.addRow("ΔY (mm)", self.in_dy)
+        auto_form.addRow("ΔZ (mm)", self.in_dz)
         auto_form.addRow(self.chk_serpentine)
-        auto_form.addRow("Dispense pump", self.cmb_dispense_pump)
+        auto_form.addRow("Mode", self.cmb_mode)
+        auto_form.addRow("Aspirate (ms)", self.in_aspirate_ms)
         auto_form.addRow("Dispense (ms)", self.in_dispense_ms)
+        auto_form.addRow("Settle (ms)", self.in_settle_ms)
 
         right_col.addWidget(auto_group)
         
@@ -1037,27 +1097,20 @@ class AutomationTab(QWidget):
                 "QPushButton:hover { background-color: #354555; }"
             )
 
-    def _on_well_clicked(self, row: int, col: int, gx: int, gy: int) -> None:
-        well_name = f"{chr(65 + row)}{col + 1}"
-        popup = WellPopup(well_name, self)
-        popup.move_to_requested.connect(lambda: self._move_to_well(row, col, popup))
-        popup.info_requested.connect(lambda: self._open_well_info(row, col, popup))
-        popup.move(gx + 8, gy + 8)
-        popup.show()
-
-    def _open_well_info(self, row: int, col: int, popup: "WellPopup") -> None:
-        popup.close()
+    def _on_well_clicked(self, row: int, col: int, _gx: int, _gy: int) -> None:
         well_name = f"{chr(65 + row)}{col + 1}"
         dlg = WellInfoDialog(well_name, self._well_notes.get(well_name, ""), self)
         dlg.info_saved.connect(lambda name, text: self._save_well_note(name, text))
+        dlg.move_to_requested.connect(lambda: self._move_to_well(row, col, None))
         dlg.exec_()
 
     def _save_well_note(self, well_name: str, text: str) -> None:
         self._well_notes[well_name] = text
         self.post_message(f"Information saved for well {well_name}.")
 
-    def _move_to_well(self, row: int, col: int, popup: "WellPopup") -> None:
-        popup.close()
+    def _move_to_well(self, row: int, col: int, popup: "WellPopup | None") -> None:
+        if popup is not None:
+            popup.close()
         try:
             dx = float(self.in_dx.text().strip())
             dy = float(self.in_dy.text().strip())
@@ -1082,22 +1135,41 @@ class AutomationTab(QWidget):
 
         text = QLabel(
             "<b>Before Starting</b><br><br>"
-            "1. Connect the gantry system.<br>"
-            "2. Set the working home position.<br>"
-            "3. Confirm plate layout and spacing.<br>"
-            "4. Verify calibration if needed.<br><br>"
+            "1. Connect the gantry and home all axes.<br>"
+            "2. Move the needle to well A1 (top-left), then hit <b>Set Home</b>.<br>"
+            "3. Set your plate type and well spacing (ΔX, ΔY) in mm.<br>"
+            "4. Set ΔZ — how far each needle plunges into the well (0 = skip Z moves).<br>"
+            "5. Choose a mode and configure timing.<br><br>"
 
-            "<b>Routine Behavior</b><br><br>"
-            "• The routine moves through wells based on the layout.<br>"
-            "• Serpentine mode alternates direction each row.<br>"
-            "• Z movement and wait times are applied per well.<br><br>"
+            "<b>Modes</b><br><br>"
+            "• <b>Demo</b> — gantry moves only, no pumps fire. Use this to verify "
+            "spacing and Z depth before running with media.<br>"
+            "• <b>Pump</b> — full routine with aspirate and dispense at every well. "
+            "Requires incubator board to be connected.<br><br>"
 
-            "<b>Important Notes</b><br><br>"
-            "• Do not start until home is set.<br>"
-            "• Use Stop to interrupt the routine.<br>"
-            "• Watch the status panel for progress."
-            
-            "Camera well calibration is not implemented into the routine yet, this is a preview!"
+            "<b>Per-Well Sequence (Pump Mode)</b><br><br>"
+            "1. <b>Z2 down</b> — aspirate needle lowers into well<br>"
+            "2. <b>Aspirate</b> — Pump 1 reverse runs for <i>Aspirate (ms)</i><br>"
+            "3. <b>Z2 up</b> — aspirate needle lifts (after aspirate + settle time)<br>"
+            "4. <b>Z1 down</b> — dispense needle lowers into well<br>"
+            "5. <b>Dispense</b> — Pump 2 runs for <i>Dispense (ms)</i><br>"
+            "6. <b>Z1 up</b> — dispense needle lifts (after dispense + settle time)<br>"
+            "7. <b>Move</b> — gantry moves to next well<br><br>"
+
+            "<b>Timing Tips</b><br><br>"
+            "• <b>Settle (ms)</b> is added on top of the pump duration before the needle "
+            "lifts — this ensures the pump has fully stopped before moving. 200–500 ms is "
+            "usually sufficient.<br>"
+            "• In Demo mode, settle time sets the minimum dwell at each well.<br>"
+            "• Serpentine mode zigzags rows (A→ then ←B then C→) to reduce travel distance.<br><br>"
+
+            "<b>Important</b><br><br>"
+            "• Start button is disabled until Set Home is confirmed.<br>"
+            "• In Pump mode, connect the incubator board first (Sensors tab).<br>"
+            "• Use <b>Stop</b> to abort at any time — the gantry will finish its "
+            "current M400 barrier then halt.<br>"
+            "• Z2 = second Z axis (A axis) connected to Pump 1 (bidirectional).<br>"
+            "• Z1 = first Z axis connected to Pump 2 (single direction)."
         )
         text.setWordWrap(True)
         text.setTextFormat(Qt.RichText)
@@ -1241,10 +1313,6 @@ class AutomationTab(QWidget):
             run_min = float(self.in_run_duration.text().strip())
         except ValueError:
             run_min = 0.0
-        try:
-            dispense_ms = int(self.in_dispense_ms.text().strip() or 0)
-        except ValueError:
-            dispense_ms = 0
         return {
             "plate_type": self.cmb_plate.currentText(),
             "rows": self.spn_rows.value(),
@@ -1252,11 +1320,12 @@ class AutomationTab(QWidget):
             "dx": self.in_dx.text().strip(),
             "dy": self.in_dy.text().strip(),
             "dz": self.in_dz.text().strip(),
-            "wait_s": self.in_wait.text().strip(),
             "serpentine": self.chk_serpentine.isChecked(),
+            "mode": self.cmb_mode.currentData(),
+            "aspirate_ms": self._ms(self.in_aspirate_ms),
+            "dispense_ms": self._ms(self.in_dispense_ms),
+            "settle_ms": self._ms(self.in_settle_ms),
             "total_run_s": run_min * 60.0,
-            "pump_select": self.cmb_dispense_pump.currentData(),
-            "dispense_ms": dispense_ms,
         }
 
 
