@@ -62,11 +62,13 @@ Key `"type"` values sent from GUI to gantry process:
 
 `RoutineController` is a `QObject` (not a separate process) that drives automation via `QTimer`-based state machine phases:
 
-`idle` → `z_down` → `move_xy` → `z_up` → `wait` → `dispense` → `retract` → (repeat or `idle`)
+`z2_down` → `aspirate` → `z2_up` → `z1_down` → `dispense` → `z1_up` → `xy_move` → (repeat or complete)
 
-- Well grid iteration via `_grid_iter()` — yields `(row, col, target_well, phase)`, supports serpentine scan
-- Emits Qt signals: `status_changed(str)`, `log_message(str)`
-- **Pump/dispense integration is incomplete** (TODO in code) — dispense phase exists but doesn't call incubator serial
+- Z2 is the aspirate needle (A-axis), Z1 is the dispense needle (Z-axis)
+- `RoutineConfig` dataclass holds `aspirate_ms`, `dispense_ms`, `settle_ms`, `mode` ("pump" or "contact"), plate geometry
+- Well grid iteration via `_grid_iter()` — yields `(row, col, dx, dy)` direction vectors; supports serpentine scan
+- Pump sinks (`aspirate_sink`, `dispense_sink`) are `Callable[[int], None]` injected at construction; active only when `mode == "pump"` and the sink is not `None`
+- Emits Qt signals: `status_changed(dict)` with keys `"status"` and `"phase"`, `log_message(str)`
 
 ## Arduino Incubator Protocol
 
