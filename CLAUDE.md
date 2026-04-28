@@ -14,7 +14,7 @@ python main.py
 
 No formal test suite or lint config. The app runs in **simulator mode** without any connected hardware — hardware imports are wrapped in `try/except` so every component degrades gracefully. Toggle "Simulator" vs "Board" mode in the UI to switch serial communication on/off.
 
-Dependencies (no requirements.txt): `PyQt5`, `pyqtgraph`, `pygame`, `pyserial`, `opencv-python`, `numpy`. Optional: `qdarkstyle`.
+Dependencies (no requirements.txt): `PyQt5`, `pyqtgraph`, `pygame`, `pyserial`, `opencv-python`, `numpy`. Optional: `qdarkstyle`, `matplotlib` (sensor plots degrade gracefully if absent).
 
 ## Process & Thread Architecture
 
@@ -42,11 +42,13 @@ The GUI drains the gantry queue every **50 ms** via a `QTimer`. Gantry move comm
 ## Gantry Motion Details
 
 - **Two independent channels**: `"needle"` and `"camera"` — each has its own serial port and `GantryState` dataclass
+- **`MotionChannel`** dataclass wraps a `GantryState` + pending delta accumulators (`dx`, `dy`, `dz`, `de`, `da`) per channel
 - **Motion target combo** in UI: "Needle", "Camera", or "Both" — all queued moves route to selected channel(s)
 - Position is **software-tracked** (not read back from firmware); there is no encoder feedback
-- Y-axis is flipped (`flip_y = -1.0`) to match screen coordinate orientation
+- Y-axis is flipped (`flip_y = -1.0`), Z-axis is flipped (`flip_z = -1.0`) to match coordinate orientation
 - Step size clamps: XY `[0.005, 5.0]` mm, Z `[0.001, 2.0]` mm, E `[0.001, 1.0]` mm
 - Absolute moves use the G90 → G1 → G91 sequence (Marlin firmware assumed: `FIRMWARE_IS_MARLIN = True`)
+- `move_rel` commands accept a `da` field for the A-axis (Z2 / second needle); `move_abs` accepts `A`
 
 ## Gantry Queue Message Types
 
@@ -56,7 +58,7 @@ Key `"type"` values sent from GUI to gantry process:
 - `"set_steps"` / `"set_feed"` — update step/feed settings (broadcast to both channels)
 - `"fan_set"` — fan/pump control (`PUMP_FAN_INDEX = 0`)
 - `"btn_estop"` — emergency stop
-- `"gantry_cmd"` — structured move command
+- `"gantry_cmd"` — structured move command with `"cmd"` key (`"move_rel"`, `"move_abs"`, `"set_home"`)
 
 ## Routine Automation (backend/routine.py)
 
@@ -65,7 +67,8 @@ Key `"type"` values sent from GUI to gantry process:
 `z2_down` → `aspirate` → `z2_up` → `z1_down` → `dispense` → `z1_up` → `xy_move` → (repeat or complete)
 
 - Z2 is the aspirate needle (A-axis), Z1 is the dispense needle (Z-axis)
-- `RoutineConfig` dataclass holds `aspirate_ms`, `dispense_ms`, `settle_ms`, `mode` ("pump" or "contact"), plate geometry
+- `RoutineConfig` dataclass holds `aspirate_ms`, `dispense_ms`, `settle_ms`, `mode` ("demo", "pump", or "contact"), plate geometry
+- `"demo"` mode runs the motion cycle without activating pumps; `"pump"` mode fires pump sinks
 - Well grid iteration via `_grid_iter()` — yields `(row, col, dx, dy)` direction vectors; supports serpentine scan
 - Pump sinks (`aspirate_sink`, `dispense_sink`) are `Callable[[int], None]` injected at construction; active only when `mode == "pump"` and the sink is not `None`
 - Emits Qt signals: `status_changed(dict)` with keys `"status"` and `"phase"`, `log_message(str)`
@@ -77,6 +80,13 @@ The Arduino outputs one line every ~5 s matching this pattern (current firmware)
 CO2: 412 ppm | Temp: 36.85 C | RH: 72.34 % | Setpoint: 37.00 C | Heater PWM: 47
 ```
 Commands sent TO the Arduino — see `IncubatorSerial` in `backend/incubator.py` for the exact strings (they differ from the older firmware format). The older firmware format (which included "Error" and "Pump: STOPPED" fields) is **not** matched by the current regex.
+
+## Sensors Tab (tabs/sensors_tab.py)
+
+- `SensorsTab` has two reader modes: `IncubatorSerial` (real hardware) or `SimReader` (software simulation, independent of gantry simulator mode). `SimReader` runs in its own daemon thread at 1 Hz and generates physically plausible data with PID-like temperature drift toward setpoint.
+- Alert thresholds: temp warn `36.5–37.5°C`, temp critical `≥40°C`; CO₂ warn outside `48k–52k ppm`; RH warn `<90%`; heater warn at PWM=255. Pop-ups fire once per alert event (deduplicated via `_alert_active` dict).
+- Live matplotlib plots (4-subplot: CO₂, temp, RH, O₂) are rendered only when `matplotlib` is installed and recording is active; otherwise a fallback label is shown.
+- `SensorCard` (`QFrame`) displays a single metric with accent-color border; `set_alert("normal"|"warn"|"critical")` updates border/text color without rebuilding the widget.
 
 ## Camera
 
@@ -120,7 +130,7 @@ Commands sent TO the Arduino — see `IncubatorSerial` in `backend/incubator.py`
 ## Guided Tour & Help Panel
 
 - `GuideWindow` (`tabs/guide_panel.py`) is a `QDialog` docked as a floating panel — contains collapsible section cards (HTML body) describing each feature area. Opened via the help button in `StageGUI2`.
-- `GuidedTour` (`tabs/guided_tour.py`) overlays a `TourHighlight` (semi-transparent border widget) and `TourPopup` (step dialog) on the main window. Steps are a list of `(widget_ref, title, text)` tuples defined in `GuidedTour.__init__`. `start()` / `next_step()` / `prev_step()` / `finish()` drive the sequence.
+- `GuidedTour` (`tabs/guided_tour.py`) overlays a `TourHighlight` (semi-transparent border widget) and `TourPopup` (step dialog) on the main window. Steps are a list of dicts with `"tab"`, `"widget"`, `"title"`, `"text"` keys defined in `StageGUI2.__init__`. `start()` / `next_step()` / `prev_step()` / `finish()` drive the sequence.
 - Both are instantiated in `StageGUI2.__init__` and wired to the guide button via `guide_window.btn_start_tour.clicked`.
 
 ## Controller Mapping
@@ -130,6 +140,8 @@ Xbox controller actions stored in `backend/config/controller_map.json` (auto-cre
 ## Main Window (`StageGUI2`)
 
 The top-level `QMainWindow` subclass is `StageGUI2` (in `main.py`). It owns the gantry `mp.Process`, the `IncubatorSerial` thread, `CameraManager`, `RoutineController`, and all tab widgets. Signal wiring between tabs and backend components all lives in `StageGUI2`.
+
+Key state cached in `StageGUI2`: `_needle_abs`, `_camera_stage_abs` (per-channel position dicts), `_home_set` (bool, emits `home_set_changed` signal when toggled), `_active_target` (needle/camera/both, lowercase).
 
 ## UI / Styling
 

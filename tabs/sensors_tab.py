@@ -106,10 +106,12 @@ class SimReader(threading.Thread):
         self._stop_event = threading.Event()
         self.rate = max(0.1, float(rate_hz))
         self.t0 = time.time()
-        self.base_co2 = 650 + random.uniform(-40, 40)
-        self.base_temp = 22.5 + random.uniform(-1, 1)
-        self.base_rh = 42 + random.uniform(-5, 5)
-        self.base_o2 = 20.7 + random.uniform(-0.2, 0.2)
+        self.setpoint = 37.0
+        # Incubator starting conditions: warming up from slightly below setpoint
+        self._sim_temp = 36.2 + random.uniform(-0.1, 0.1)
+        self.base_co2 = 50000 + random.uniform(-500, 500)   # 5% CO2 target
+        self.base_rh = 95.0 + random.uniform(-1, 1)         # >90% RH target
+        self.base_o2 = 20.9 + random.uniform(-0.05, 0.05)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -119,13 +121,32 @@ class SimReader(threading.Thread):
         dt = 1.0 / self.rate
         while not self._stop_event.is_set():
             t = time.time() - self.t0
-            co2 = self.base_co2 + 30 * math.sin(2 * math.pi * 0.015 * t) + 8 * math.sin(2 * math.pi * 0.21 * t) + random.gauss(0, 3)
-            co2 = max(380, co2)
-            temp = self.base_temp + 0.25 * math.sin(2 * math.pi * 0.01 * t) + random.gauss(0, 0.03)
-            rh = self.base_rh - 0.35 * (temp - self.base_temp) + random.gauss(0, 0.2)
-            rh = max(15, min(85, rh))
-            o2 = self.base_o2 + 0.02 * math.sin(2 * math.pi * 0.02 * t) + random.gauss(0, 0.01)
-            self.q.put(("data", {"co2": float(co2), "temp": float(temp), "rh": float(rh), "o2": float(o2)}))
+
+            # Simulate PID heater: proportional response drives temp toward setpoint
+            error = self.setpoint - self._sim_temp
+            heater_pwm = max(0, min(255, int(error * 120)))
+            # Temp drifts toward setpoint with small noise
+            self._sim_temp += error * 0.04 + random.gauss(0, 0.015)
+            temp = self._sim_temp
+
+            # CO2 oscillates gently around 5% target (50,000 ppm)
+            co2 = self.base_co2 + 200 * math.sin(2 * math.pi * 0.008 * t) + random.gauss(0, 80)
+            co2 = max(45000, min(55000, co2))
+
+            # RH stable above 90%, slight inverse correlation with temp deviation
+            rh = self.base_rh - 0.4 * (temp - self.setpoint) + random.gauss(0, 0.15)
+            rh = max(88, min(99, rh))
+
+            o2 = self.base_o2 + random.gauss(0, 0.01)
+
+            self.q.put(("data", {
+                "co2":        float(co2),
+                "temp":       float(temp),
+                "rh":         float(rh),
+                "o2":         float(o2),
+                "setpoint":   float(self.setpoint),
+                "heater_pwm": heater_pwm,
+            }))
             time.sleep(dt)
         self.q.put(("status", "Simulation stopped"))
 
