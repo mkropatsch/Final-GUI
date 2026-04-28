@@ -73,13 +73,19 @@ Key `"type"` values sent from GUI to gantry process:
 - Pump sinks (`aspirate_sink`, `dispense_sink`) are `Callable[[int], None]` injected at construction; active only when `mode == "pump"` and the sink is not `None`
 - Emits Qt signals: `status_changed(dict)` with keys `"status"` and `"phase"`, `log_message(str)`
 
-## Arduino Incubator Protocol
+## Incubator Protocol (Marlin)
 
-The Arduino outputs one line every ~5 s matching this pattern (current firmware):
-```
-CO2: 412 ppm | Temp: 36.85 C | RH: 72.34 % | Setpoint: 37.00 C | Heater PWM: 47
-```
-Commands sent TO the Arduino — see `IncubatorSerial` in `backend/incubator.py` for the exact strings (they differ from the older firmware format). The older firmware format (which included "Error" and "Pump: STOPPED" fields) is **not** matched by the current regex.
+The board now runs Marlin firmware. Two independent line formats arrive on the same serial port:
+
+- **Marlin temperature auto-report** (enabled by `M155 S5` on connect, every 5 s): `T:22.87 /37.00 @:127` → parsed by `MARLIN_TEMP_PATTERN` → extracts `temp`, `setpoint`, `heater_pwm` (0–255)
+- **CO2/RH sensor line** (separate hardware, same serial stream): `CO2: 412 ppm | RH: 72.34 %` → parsed by `CO2_RH_PATTERN` → extracts `co2`, `rh`
+
+`IncubatorSerial.run()` sends `M999` (clear halt) then `M155 S5` immediately after opening the port. It accumulates a `_last` dict across both line types so every `("data", dict)` emission includes the most recent values for all fields.
+
+Commands sent TO the board:
+- `M999` / `M155 S5` — sent automatically on connect
+- `M104 S<temp>` — set heater setpoint (via `set_setpoint()`)
+- Pump commands (`pump1 forward <ms>`, etc.) — unchanged from before; the Arduino pump controller co-exists on the same serial stream
 
 ## Sensors Tab (tabs/sensors_tab.py)
 

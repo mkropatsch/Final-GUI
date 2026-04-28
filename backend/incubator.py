@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 # incubator.py
-# Bidirectional serial thread for the Arduino incubator board.
+# Bidirectional serial thread for the Marlin-based incubator board.
 #
-# The Arduino outputs one line every ~5 seconds:
-#   CO2: 412 ppm | Temp: 36.85 C | RH: 72.34 % | Setpoint: 37.00 C | Heater PWM: 47
+# Marlin outputs temperature auto-reports (enabled via M155 S5) every 5 seconds:
+#   T:22.87 /37.00 @:127
 #
-# Commands we send TO the Arduino (all lowercase — Arduino calls cmd.toLowerCase()):
-#   pump1 forward <ms>   — run pump 1 forward for <ms> milliseconds
-#   pump1 reverse <ms>   — run pump 1 reverse for <ms> milliseconds
-#   stop1                — stop pump 1
-#   pump2 <ms>           — run pump 2 for <ms> milliseconds (single direction)
-#   stop2                — stop pump 2
-#   stopall              — stop all pumps
-#   setpoint <temp>      — update heater target temperature
+# CO2/RH sensor lines arrive on the same serial stream (separate from Marlin):
+#   CO2: 412 ppm | RH: 72.34 %
+#
+# Commands we send TO the board:
+#   M999               — clear any halted/error state (sent once on connect)
+#   M155 S5            — enable auto temperature report every 5 seconds (sent once on connect)
+#   M104 S<temp>       — set heater target temperature
+#   pump1 forward <ms> — run pump 1 forward for <ms> milliseconds
+#   pump1 reverse <ms> — run pump 1 reverse for <ms> milliseconds
+#   stop1              — stop pump 1
+#   pump2 <ms>         — run pump 2 for <ms> milliseconds (single direction)
+#   stop2              — stop pump 2
+#   stopall            — stop all pumps
 
 import queue
 import re
@@ -28,15 +33,24 @@ except Exception:
     HAS_SERIAL = False
 
 
-# Matches the Arduino's output line format (no Error or Pump fields in new firmware)
-INCUBATOR_PATTERN = re.compile(
-    r"CO2:\s*(\d+)\s*ppm"
-    r"\s*\|\s*Temp:\s*([-\d\.]+)\s*C"
-    r"\s*\|\s*RH:\s*([-\d\.]+)\s*%"
-    r"\s*\|\s*Setpoint:\s*([-\d\.]+)\s*C"
-    r"\s*\|\s*Heater PWM:\s*(\d+)",
+# Marlin auto-report temperature line: T:22.87 /37.00 @:127
+# Groups: (current_temp, setpoint, heater_power 0-255)
+MARLIN_TEMP_PATTERN = re.compile(
+    r"T:([-\d\.]+)\s*/\s*([-\d\.]+)\s*@:(\d+)",
     re.IGNORECASE,
 )
+
+# CO2/RH sensor line (same serial stream, separate from Marlin temperature reporting)
+# Tolerates extra fields between CO2 and RH.
+# Groups: (co2_ppm, rh_percent)
+CO2_RH_PATTERN = re.compile(
+    r"CO2:\s*(\d+)\s*ppm"
+    r".*?RH:\s*([-\d\.]+)\s*%",
+    re.IGNORECASE,
+)
+
+# Legacy alias kept so any code importing INCUBATOR_PATTERN still compiles
+INCUBATOR_PATTERN = CO2_RH_PATTERN
 
 
 class IncubatorSerial(threading.Thread):
@@ -98,7 +112,7 @@ class IncubatorSerial(threading.Thread):
 
     # ---- Heater ----
     def set_setpoint(self, temp: float) -> None:
-        self.send_command(f"setpoint {temp:.2f}")
+        self.send_command(f"M104 S{temp:.2f}")
 
     # ------------------------------------------------------------------
     # Thread run loop
@@ -115,6 +129,18 @@ class IncubatorSerial(threading.Thread):
 
         self.q.put(("status", f"Connected to {self.port}"))
 
+        # Clear any halted/error state, then enable auto temperature reporting every 5 s
+        self.ser.write(b"M999\n")
+        self.ser.flush()
+        time.sleep(0.1)
+        self.ser.write(b"M155 S5\n")
+        self.ser.flush()
+
+        # Accumulate partial readings across line types so each emission carries
+        # the most recent values for all fields (temp lines don't include CO2/RH
+        # and CO2/RH lines don't include temp).
+        _last: dict = {}
+
         while not self._stop_event.is_set():
 
             # --- drain any outbound commands first ---
@@ -126,24 +152,25 @@ class IncubatorSerial(threading.Thread):
             except queue.Empty:
                 pass
 
-            # --- read one line from Arduino ---
+            # --- read one line from Marlin ---
             try:
                 raw = self.ser.readline()
                 if not raw:
                     continue
                 line = raw.decode(errors="replace").strip()
-                match = INCUBATOR_PATTERN.search(line)
-                if match:
-                    self.q.put((
-                        "data",
-                        {
-                            "co2":        float(match.group(1)),
-                            "temp":       float(match.group(2)),
-                            "rh":         float(match.group(3)),
-                            "setpoint":   float(match.group(4)),
-                            "heater_pwm": int(match.group(5)),
-                        },
-                    ))
+
+                temp_match = MARLIN_TEMP_PATTERN.search(line)
+                co2_match = CO2_RH_PATTERN.search(line)
+
+                if temp_match:
+                    _last["temp"]       = float(temp_match.group(1))
+                    _last["setpoint"]   = float(temp_match.group(2))
+                    _last["heater_pwm"] = int(temp_match.group(3))
+                    self.q.put(("data", dict(_last)))
+                elif co2_match:
+                    _last["co2"] = float(co2_match.group(1))
+                    _last["rh"]  = float(co2_match.group(2))
+                    self.q.put(("data", dict(_last)))
                 elif line:
                     self.q.put(("raw", line))
 

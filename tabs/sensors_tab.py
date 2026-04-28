@@ -41,7 +41,7 @@ except Exception:
     HAS_MPL = False
 
 
-from backend.incubator import IncubatorSerial, INCUBATOR_PATTERN
+from backend.incubator import IncubatorSerial, MARLIN_TEMP_PATTERN, CO2_RH_PATTERN
 
 
 class SerialReader(threading.Thread):
@@ -67,24 +67,25 @@ class SerialReader(threading.Thread):
 
         self.q.put(("status", f"Connected to {self.port}"))
 
+        _last: dict = {}
+
         while not self._stop_event.is_set():
             try:
                 raw = self.ser.readline()
                 if not raw:
                     continue
                 line = raw.decode(errors="replace").strip()
-                match = INCUBATOR_PATTERN.search(line)
-                if match:
-                    self.q.put((
-                        "data",
-                        {
-                            "co2": float(match.group(1)),
-                            "temp": float(match.group(2)),
-                            "rh": float(match.group(3)),
-                            "setpoint": float(match.group(4)),
-                            "heater_pwm": int(match.group(5)),
-                        },
-                    ))
+                temp_match = MARLIN_TEMP_PATTERN.search(line)
+                co2_match = CO2_RH_PATTERN.search(line)
+                if temp_match:
+                    _last["temp"]       = float(temp_match.group(1))
+                    _last["setpoint"]   = float(temp_match.group(2))
+                    _last["heater_pwm"] = int(temp_match.group(3))
+                    self.q.put(("data", dict(_last)))
+                elif co2_match:
+                    _last["co2"] = float(co2_match.group(1))
+                    _last["rh"]  = float(co2_match.group(2))
+                    self.q.put(("data", dict(_last)))
                 elif line:
                     self.q.put(("raw", line))
             except Exception as e:
@@ -231,11 +232,14 @@ class SensorsTab(QWidget):
         self.T_WARN = 1500
 
         # Thresholds for alerts
-        self.THRESH_TEMP_LOW          = 36.5   # °C — lower bound of safe range
-        self.THRESH_TEMP_HIGH         = 37.5   # °C — upper bound of safe range
-        self.THRESH_TEMP_CRITICAL     = 40.0   # °C — absolute critical (popup)
-        self.THRESH_TEMP_TREND_N      = 6      # readings needed for trend check
-        self.THRESH_TEMP_TREND_RISE   = 0.15   # °C rise across trend window to flag
+        self.THRESH_TEMP_LOW               = 36.5   # °C — lower bound of safe range
+        self.THRESH_TEMP_HIGH              = 37.5   # °C — upper bound of safe range
+        self.THRESH_TEMP_CRITICAL          = 40.0   # °C — sustained overheat threshold
+        self.THRESH_TEMP_CRITICAL_READINGS = 30     # consecutive readings required to trigger shutoff
+        self.THRESH_TEMP_TREND_N           = 6      # readings needed for trend check
+        self.THRESH_TEMP_TREND_RISE        = 0.15   # °C rise across trend window to flag
+
+        self._temp_critical_count: int = 0   # consecutive readings at or above critical temp
 
         # CO₂ — incubator target: 5% = 50,000 ppm (spec: 5% ± 0.2%)
         self.THRESH_CO2_LOW           = 48000  # ppm (4.8 %)
@@ -542,14 +546,13 @@ class SensorsTab(QWidget):
     def _start_log(self) -> None:
         os.makedirs(self._log_dir, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self._log_path = os.path.join(self._log_dir, f"sensors_{stamp}.json")
+        self._log_path = os.path.join(self._log_dir, f"sensors_{stamp}.jsonl")
         self._session_start = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._log_buffer = []
-        self._log_flush_count = 0
         self._alert_active = {}
         try:
             with open(self._log_path, "w", encoding="utf-8") as f:
-                json.dump({"session_start": self._session_start, "readings": []}, f, indent=2)
+                f.write(json.dumps({"type": "header", "session_start": self._session_start}) + "\n")
         except Exception as e:
             self.conn_status.setText(f"Log create error: {e}")
 
@@ -573,8 +576,13 @@ class SensorsTab(QWidget):
 
         if temp is not None:
             if temp >= self.THRESH_TEMP_CRITICAL:
-                alerts.append("temp_critical")
-            elif temp > self.THRESH_TEMP_HIGH or temp < self.THRESH_TEMP_LOW:
+                self._temp_critical_count += 1
+                if self._temp_critical_count >= self.THRESH_TEMP_CRITICAL_READINGS:
+                    alerts.append("temp_critical")
+            else:
+                self._temp_critical_count = 0
+
+            if temp > self.THRESH_TEMP_HIGH or temp < self.THRESH_TEMP_LOW:
                 alerts.append("temp_out_of_range")
                 if self._is_temp_rising():
                     alerts.append("temp_rising_trend")
@@ -617,47 +625,37 @@ class SensorsTab(QWidget):
         else:
             self.card_rh.set_alert("normal")
 
-        # Pop-ups — only for events worth interrupting the user
-        # temp_out_of_range: card change only, no popup (could be a blip)
-        # temp_rising_trend: one popup warning that temp is climbing
-        # temp_critical:     one popup that temp has reached dangerous level
-        popup_alerts = {
-            "temp_critical":      (QMessageBox.critical,
-                                   f"Temperature critical: {temp_str}\n"
-                                   f"Safe range is {self.THRESH_TEMP_LOW}–{self.THRESH_TEMP_HIGH}°C. "
-                                   f"Reached {self.THRESH_TEMP_CRITICAL}°C threshold."),
-            "temp_rising_trend":  (QMessageBox.warning,
-                                   f"Temperature trending upward: {temp_str}\n"
-                                   f"Readings have been consistently rising outside the desired range "
-                                   f"({self.THRESH_TEMP_LOW}–{self.THRESH_TEMP_HIGH}°C)."),
-            "co2_high":           (QMessageBox.warning,
-                                   f"CO₂ too high: {d.get('co2', 0):.0f} ppm "
-                                   f"({d.get('co2', 0)/10000:.2f}%)\n"
-                                   f"Target range: {self.THRESH_CO2_LOW//1000}–"
-                                   f"{self.THRESH_CO2_HIGH//1000}k ppm (4.8–5.2%)"),
-            "co2_low":            (QMessageBox.warning,
-                                   f"CO₂ too low: {d.get('co2', 0):.0f} ppm "
-                                   f"({d.get('co2', 0)/10000:.2f}%)\n"
-                                   f"Target range: {self.THRESH_CO2_LOW//1000}–"
-                                   f"{self.THRESH_CO2_HIGH//1000}k ppm (4.8–5.2%)"),
-            "rh_low":             (QMessageBox.warning,
-                                   f"Humidity too low: {d.get('rh', '?'):.1f}%\n"
-                                   f"Incubator requires >90% RH."),
-            "heater_saturated":   (QMessageBox.warning,
-                                   "Heater PWM at maximum — may not reach setpoint."),
+        # Shut off the heater immediately on first critical detection
+        if "temp_critical" in alerts and not self._alert_active.get("temp_critical"):
+            if isinstance(self.reader, IncubatorSerial):
+                self.reader.set_setpoint(0.0)
+                self._last_setpoint = 0.0
+                self.setpoint_input.setText("0.0")
+
+        # Alert messages — shown in the status label (non-blocking so unattended
+        # monitoring never freezes waiting for a dialog to be dismissed)
+        alert_messages = {
+            "temp_critical":    f"⚠ CRITICAL: Temperature {temp_str} — heater shut off",
+            "temp_rising_trend":f"⚠ WARNING: Temperature trending upward ({temp_str})",
+            "co2_high":         f"⚠ WARNING: CO₂ too high ({d.get('co2', 0):.0f} ppm)",
+            "co2_low":          f"⚠ WARNING: CO₂ too low ({d.get('co2', 0):.0f} ppm)",
+            "rh_low":           f"⚠ WARNING: Humidity too low ({d.get('rh', '?'):.1f}%)",
+            "heater_saturated": "⚠ WARNING: Heater PWM at maximum",
         }
         for alert in alerts:
-            if alert not in popup_alerts:
-                continue   # temp_out_of_range: visual only, no popup
+            if alert not in alert_messages:
+                continue   # temp_out_of_range: card colour change only
             if not self._alert_active.get(alert):
                 self._alert_active[alert] = True
-                fn, msg = popup_alerts[alert]
-                fn(self, "Sensor Alert", msg)
+                self.conn_status.setText(alert_messages[alert])
+                self.conn_status.setStyleSheet("color: #ff5555; font-weight: bold;")
 
-        # Clear resolved alerts
-        for alert in list(self._alert_active):
-            if alert not in alerts:
-                self._alert_active[alert] = False
+        # Clear resolved alerts and restore normal status colour
+        newly_cleared = [a for a in self._alert_active if a not in alerts]
+        for alert in newly_cleared:
+            self._alert_active[alert] = False
+        if newly_cleared and not any(self._alert_active.values()):
+            self.conn_status.setStyleSheet("")
 
     def _append_reading(self, d: dict, alerts: list[str]) -> None:
         reading = {
@@ -671,28 +669,26 @@ class SensorsTab(QWidget):
             "alerts":     alerts,
         }
         self._log_buffer.append(reading)
-        self._flush_log()
+        # Flush every 10 readings so a crash loses at most 50 seconds of data
+        if len(self._log_buffer) >= 10:
+            self._flush_log()
 
     def _flush_log(self, final: bool = False) -> None:
         if not self._log_path or not self._log_buffer:
+            if final and self._log_path:
+                try:
+                    with open(self._log_path, "a", encoding="utf-8") as f:
+                        f.write(json.dumps({"type": "footer", "session_end": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}) + "\n")
+                except Exception:
+                    pass
             return
         try:
-            # Read existing file if it exists, otherwise start fresh
-            if os.path.exists(self._log_path):
-                with open(self._log_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            else:
-                data = {"session_start": self._session_start, "readings": []}
-
-            data["readings"].extend(self._log_buffer)
-            if final:
-                data["session_end"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            with open(self._log_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-
+            with open(self._log_path, "a", encoding="utf-8") as f:
+                for r in self._log_buffer:
+                    f.write(json.dumps(r) + "\n")
+                if final:
+                    f.write(json.dumps({"type": "footer", "session_end": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}) + "\n")
             self._log_buffer = []
-            self._log_flush_count = 0
         except Exception as e:
             self.conn_status.setText(f"Log write error: {e}")
 
@@ -733,10 +729,11 @@ class SensorsTab(QWidget):
         if d.get("setpoint") is not None:
             self._last_setpoint = d["setpoint"]
             
-        if HAS_MPL and self.is_recording and co2 is not None:
+        if HAS_MPL and self.is_recording and any(v is not None for v in (co2, temp, rh, o2)):
             t = time.time() - self.t0
             self.ts.append(t)
-            self.co2_series.append(co2)
+            if co2 is not None:
+                self.co2_series.append(co2)
             if temp is not None:
                 self.temp_series.append(temp)
             if rh is not None:
@@ -750,20 +747,17 @@ class SensorsTab(QWidget):
             y_rh = list(self.rh_series)
             y_o2 = list(self.o2_series)
 
-            self.l_co2.set_data(xt, y_co2)
+            if y_co2:
+                self.l_co2.set_data(xt[: len(y_co2)], y_co2)
+                self._autoscale(self.ax_co2, xt[: len(y_co2)], y_co2)
             if y_temp:
                 self.l_temp.set_data(xt[: len(y_temp)], y_temp)
-            if y_rh:
-                self.l_rh.set_data(xt[: len(y_rh)], y_rh)
-            if y_o2:
-                self.l_o2.set_data(xt[: len(y_o2)], y_o2)
-
-            self._autoscale(self.ax_co2, xt, y_co2)
-            if y_temp:
                 self._autoscale(self.ax_temp, xt[: len(y_temp)], y_temp)
             if y_rh:
+                self.l_rh.set_data(xt[: len(y_rh)], y_rh)
                 self._autoscale(self.ax_rh, xt[: len(y_rh)], y_rh)
             if y_o2:
+                self.l_o2.set_data(xt[: len(y_o2)], y_o2)
                 self._autoscale(self.ax_o2, xt[: len(y_o2)], y_o2)
 
             if self.canvas is not None:
