@@ -445,9 +445,36 @@ class StageGUI2(QMainWindow):
         right_col.setSpacing(8)
 
         self.manual_group = QGroupBox("Manual Jog")
-        mc = QGridLayout(self.manual_group)
+        manual_outer = QVBoxLayout(self.manual_group)
+        manual_outer.setSpacing(6)
+        manual_outer.setContentsMargins(8, 8, 8, 8)
+
+        # --- Home bar ---
+        home_bar = QHBoxLayout()
+        home_bar.setSpacing(8)
+
+        self.btn_set_home = QPushButton("Set Home")
+        self.btn_set_home.setStyleSheet(
+            "QPushButton { background-color: #2a6496; color: white; font-weight: bold; border-radius: 4px; padding: 4px 10px; }"
+            "QPushButton:hover { background-color: #3a7fc1; }"
+            "QPushButton:disabled { background-color: #3a3a3a; color: #777; }"
+        )
+
+        self.lab_home_status = QLabel("● Home Not Set")
+        self.lab_home_status.setStyleSheet("color: #ff5555; font-weight: bold; font-size: 13px;")
+
+        home_bar.addWidget(self.btn_set_home)
+        home_bar.addWidget(self.lab_home_status)
+        home_bar.addStretch()
+        manual_outer.addLayout(home_bar)
+
+        # --- Jog grid ---
+        jog_widget = QWidget()
+        mc = QGridLayout(jog_widget)
         mc.setHorizontalSpacing(6)
         mc.setVerticalSpacing(6)
+        mc.setContentsMargins(0, 0, 0, 0)
+        manual_outer.addWidget(jog_widget)
 
         def mk(btn_text: str, w: int = 58, h: int = 38) -> QPushButton:
             b = QPushButton(btn_text)
@@ -461,7 +488,13 @@ class StageGUI2(QMainWindow):
         self.btn_zp2 = mk("Z2↑", 58, 38)
 
         self.btn_lf = mk("←")
-        self.btn_c = mk("•")
+        self.btn_c = mk("⌂", 58, 38)
+        self.btn_c.setToolTip("Go to Home (0, 0, 0)")
+        self.btn_c.setStyleSheet(
+            "QPushButton { background-color: #2a4a2a; color: #88e06b; font-size: 16px; font-weight: bold; border-radius: 4px; }"
+            "QPushButton:hover { background-color: #3a6a3a; }"
+            "QPushButton:disabled { background-color: #2a2a2a; color: #555; }"
+        )
         self.btn_rt = mk("→")
 
         self.btn_dl = mk("↙")
@@ -660,41 +693,45 @@ class StageGUI2(QMainWindow):
             )
         )
 
-# ---- Step / Feed -----
+# ---- Step / Feed (collapsible) -----
         self.ctrl_group = QGroupBox()
         ctrl_outer = QVBoxLayout(self.ctrl_group)
         ctrl_outer.setSpacing(4)
+        ctrl_outer.setContentsMargins(8, 6, 8, 6)
 
-        # title row
+        # title row with collapse toggle
         ctrl_title = QHBoxLayout()
         ctrl_title.setSpacing(4)
-        
-        ctrl_label = QLabel("Step / Feed")
+
+        self.btn_stepfeed_toggle = QPushButton("▲ Step / Feed")
+        self.btn_stepfeed_toggle.setStyleSheet(
+            "QPushButton { background: transparent; color: #d8e2ee; font-weight: bold; "
+            "border: none; text-align: left; padding: 2px 0px; }"
+            "QPushButton:hover { color: #ffffff; }"
+        )
+        self._stepfeed_expanded = True
 
         self.ctrl_help = QPushButton("?")
         self.ctrl_help.setFixedSize(s(16), s(16))
         self.ctrl_help.setStyleSheet("""
             QPushButton {
-                color: #aaaaaa;
-                background-color: transparent;
-                border: 1px solid #666666;
-                border-radius: 8px;
-                font-weight: bold;
-                padding: 0px;
+                color: #aaaaaa; background-color: transparent;
+                border: 1px solid #666666; border-radius: 8px;
+                font-weight: bold; padding: 0px;
             }
-            QPushButton:hover {
-                color: #ffffff;
-                border: 1px solid #aaaaaa;
-            }
+            QPushButton:hover { color: #ffffff; border: 1px solid #aaaaaa; }
         """)
 
-        ctrl_title.addWidget(ctrl_label)
+        ctrl_title.addWidget(self.btn_stepfeed_toggle)
         ctrl_title.addWidget(self.ctrl_help)
         ctrl_title.addStretch()
+        ctrl_outer.addLayout(ctrl_title)
 
-        # form contents
-        ctrl_form = QFormLayout()
+        # collapsible body
+        self._stepfeed_body = QWidget()
+        ctrl_form = QFormLayout(self._stepfeed_body)
         ctrl_form.setSpacing(6)
+        ctrl_form.setContentsMargins(0, 4, 0, 0)
 
         self.in_xy = QLineEdit("0.200")
         self.in_z = QLineEdit("0.050")
@@ -709,92 +746,35 @@ class StageGUI2(QMainWindow):
         feed_row.addStretch()
 
         self.btn_apply_steps = QPushButton("Apply Step Sizes")
-        self.btn_set_home = QPushButton("Set Home")
-        self.btn_home = QPushButton("Machine Home")
         self.btn_estop = QPushButton("Emergency Stop")
         self.btn_estop.setStyleSheet(
             "QPushButton { background:#b51f1f; color:white; font-weight:bold; }"
-        )
-
-        action_row = QHBoxLayout()
-        #apply step sizes
-        action_row.addWidget(self.btn_apply_steps)
-        #set home + help
-        set_home_layout = QHBoxLayout()
-        set_home_layout.setSpacing(2)
-
-        self.set_home_help = QPushButton("?")
-        self.set_home_help.setFixedSize(s(16), s(16))
-        self.set_home_help.setStyleSheet("""
-            QPushButton {
-                color: #aaaaaa;
-                background-color: transparent;
-                border: 1px solid #666666;
-                border-radius: 8px;
-                font-weight: bold;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                color: #ffffff;
-                border: 1px solid #aaaaaa;
-            }
-        """)
-
-        set_home_layout.addWidget(self.btn_set_home)
-        set_home_layout.addWidget(self.set_home_help)
-
-        action_row.addLayout(set_home_layout)
-
-        # Machine home + help
-        machine_home_layout = QHBoxLayout()
-        machine_home_layout.setSpacing(2)
-
-        self.machine_home_help = QPushButton("?")
-        self.machine_home_help.setFixedSize(s(16), s(16))
-        self.machine_home_help.setStyleSheet(self.set_home_help.styleSheet())
-
-        machine_home_layout.addWidget(self.btn_home)
-        machine_home_layout.addWidget(self.machine_home_help)
-
-        action_row.addLayout(machine_home_layout)
-
-        self.set_home_help.clicked.connect(
-           lambda: QMessageBox.information(
-               self,
-               "Set Home",
-               "Sets the current position as (0,0,0) without moving the gantry.\n\n"
-               "This is a software-defined home.\n\n"
-               "Use 'Machine Home' to move to physical endstops."
-           )
-       )
-
-        self.machine_home_help.clicked.connect(
-            lambda: QMessageBox.information(
-                self,
-                "Machine Home",
-                "Moves the gantry to its physical home using endstops (G28).\n\n"
-                "This overrides any user-defined home."
-            )
         )
 
         ctrl_form.addRow("XY step (mm)", self.in_xy)
         ctrl_form.addRow("Z1 step (mm)", self.in_z)
         ctrl_form.addRow("Z2 step (mm)", self.in_z2)
         ctrl_form.addRow("Feed (mm/min)", feed_row)
-        ctrl_form.addRow(action_row)
+        ctrl_form.addRow(self.btn_apply_steps)
         ctrl_form.addRow(self.btn_estop)
 
-        ctrl_outer.addLayout(ctrl_title)
-        ctrl_outer.addLayout(ctrl_form)
+        ctrl_outer.addWidget(self._stepfeed_body)
+
+        def _toggle_stepfeed():
+            self._stepfeed_expanded = not self._stepfeed_expanded
+            self._stepfeed_body.setVisible(self._stepfeed_expanded)
+            self.btn_stepfeed_toggle.setText(
+                "▲ Step / Feed" if self._stepfeed_expanded else "▶ Step / Feed"
+            )
+
+        self.btn_stepfeed_toggle.clicked.connect(_toggle_stepfeed)
 
         self.ctrl_help.clicked.connect(
             lambda: QMessageBox.information(
                 self,
                 "Step / Feed",
-                "XY step and Z step set how far the gantry moves for each jog input.\n\n"
-                "Feed sets how fast the gantry moves in mm/min.\n"
-                "Smaller step sizes move farther with each command.\n"
-                "Larger step sizes move farther with each command.\n"
+                "XY step and Z step set how far the gantry moves per jog button press.\n\n"
+                "Feed sets the speed for all gantry moves in mm/min.\n"
                 "Higher feed values move faster."
             )
         )
@@ -854,10 +834,10 @@ class StageGUI2(QMainWindow):
         self.in_feed.editingFinished.connect(self._apply_feed_to_gantry)
         self.btn_apply_steps.clicked.connect(self._apply_steps_to_gantry)
         self.btn_set_home.clicked.connect(self._on_set_home)
-        self.btn_home.clicked.connect(self._on_home)
         self.btn_estop.clicked.connect(self._on_estop)
 
-        self.btn_c.clicked.connect(lambda: None)
+        self.btn_c.clicked.connect(self._on_go_home)
+        self.home_set_changed.connect(self._on_home_set_changed)
 
         self.btn_rel_move.clicked.connect(self._on_relative_move)
         self.btn_abs_move.clicked.connect(self._on_absolute_move)
@@ -1587,8 +1567,7 @@ class StageGUI2(QMainWindow):
             self.btn_zp, self.btn_zm,
             self.btn_zp2, self.btn_zm2,
             self.btn_rel_move, self.btn_abs_move,
-            self.btn_set_home, self.btn_home,
-            self.btn_apply_steps, self.btn_estop,
+            self.btn_set_home, self.btn_apply_steps, self.btn_estop,
             self.rel_x, self.rel_y, self.rel_z, self.rel_z2,
             self.abs_x, self.abs_y, self.abs_z, self.abs_z2,
             self.in_xy, self.in_z, self.in_z2, self.in_feed,
@@ -1703,13 +1682,27 @@ class StageGUI2(QMainWindow):
             return
         self._send_gui_msg({"type": "set_feed", "feed_mm_min": val})
 
-    def _on_home(self):
+    def _on_go_home(self):
         if not self._connected:
-            self._post_msg("WARNING: Not connected.")
             QMessageBox.warning(self, "Warning", "Not connected.")
             return
-        self._send_gui_msg({"type": "home_all"})
-        self._post_msg("Machine Home requested.")
+        if not self._home_set:
+            QMessageBox.warning(self, "Home Not Set", "Set home first before moving to home position.")
+            return
+        self._send_gui_msg({
+            "type": "gantry_cmd",
+            "cmd": "move_abs",
+            "X": 0.0, "Y": 0.0, "Z": 0.0, "A": 0.0,
+        })
+        self._post_msg("Moving to home (0, 0, 0).")
+
+    def _on_home_set_changed(self, is_set: bool):
+        if is_set:
+            self.lab_home_status.setText("● Home Set")
+            self.lab_home_status.setStyleSheet("color: #88e06b; font-weight: bold; font-size: 13px;")
+        else:
+            self.lab_home_status.setText("● Home Not Set")
+            self.lab_home_status.setStyleSheet("color: #ff5555; font-weight: bold; font-size: 13px;")
 
     def _on_set_home(self):
         if not self._connected:
