@@ -41,7 +41,7 @@ except Exception:
     HAS_MPL = False
 
 
-from backend.incubator import IncubatorSerial, INCUBATOR_PATTERN
+from backend.incubator import IncubatorSerial, PATTERN_THERM, PATTERN_SCD41
 
 
 class SerialReader(threading.Thread):
@@ -52,6 +52,7 @@ class SerialReader(threading.Thread):
         self.q = out_queue or queue.Queue()
         self._stop_event = threading.Event()
         self.ser = None
+        self._state: dict = {}
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -73,18 +74,24 @@ class SerialReader(threading.Thread):
                 if not raw:
                     continue
                 line = raw.decode(errors="replace").strip()
-                match = INCUBATOR_PATTERN.search(line)
-                if match:
-                    self.q.put((
-                        "data",
-                        {
-                            "co2": float(match.group(1)),
-                            "temp": float(match.group(2)),
-                            "rh": float(match.group(3)),
-                            "setpoint": float(match.group(4)),
-                            "heater_pwm": int(match.group(5)),
-                        },
-                    ))
+
+                therm = PATTERN_THERM.search(line)
+                scd = PATTERN_SCD41.search(line)
+
+                if therm:
+                    self._state.update({
+                        "temp":        float(therm.group(1)),
+                        "setpoint":    float(therm.group(2)),
+                        "heater_pwm":  int(therm.group(3)),
+                        "safety_hold": therm.group(4).upper() == "ON",
+                    })
+                    self.q.put(("data", dict(self._state)))
+                elif scd:
+                    self._state.update({
+                        "co2": float(scd.group(1)),
+                        "rh":  float(scd.group(2)),
+                    })
+                    self.q.put(("data", dict(self._state)))
                 elif line:
                     self.q.put(("raw", line))
             except Exception as e:
@@ -146,6 +153,7 @@ class SimReader(threading.Thread):
                 "o2":         float(o2),
                 "setpoint":   float(self.setpoint),
                 "heater_pwm": heater_pwm,
+                "safety_hold": temp >= 37.4,
             }))
             time.sleep(dt)
         self.q.put(("status", "Simulation stopped"))
@@ -328,11 +336,15 @@ class SensorsTab(QWidget):
         self.btn_apply_setpoint = QPushButton("Apply")
         self.btn_apply_setpoint.clicked.connect(self._on_apply_setpoint)
         self.lab_heater_pwm = QLabel("Heater PWM: —")
+        self.lab_safety_hold = QLabel("● Safety Hold: —")
+        self.lab_safety_hold.setStyleSheet("color: #555e6b; font-size: 13px; font-weight: 600;")
         heater_layout.addWidget(QLabel("Setpoint (°C)"))
         heater_layout.addWidget(self.setpoint_input)
         heater_layout.addWidget(self.btn_apply_setpoint)
         heater_layout.addSpacing(20)
         heater_layout.addWidget(self.lab_heater_pwm)
+        heater_layout.addSpacing(20)
+        heater_layout.addWidget(self.lab_safety_hold)
         heater_layout.addStretch()
         root.addWidget(heater_box)
 
@@ -730,6 +742,13 @@ class SensorsTab(QWidget):
             self.card_o2.set_value(f"{o2:.2f}")
         if d.get("heater_pwm") is not None:
             self.lab_heater_pwm.setText(f"Heater PWM: {d['heater_pwm']}/255")
+        if d.get("safety_hold") is not None:
+            on = d["safety_hold"]
+            self.lab_safety_hold.setText("● Safety Hold: ON" if on else "● Safety Hold: OFF")
+            self.lab_safety_hold.setStyleSheet(
+                "color: #ff5555; font-size: 13px; font-weight: 600;" if on
+                else "color: #88e06b; font-size: 13px; font-weight: 600;"
+            )
         if d.get("setpoint") is not None:
             self._last_setpoint = d["setpoint"]
             

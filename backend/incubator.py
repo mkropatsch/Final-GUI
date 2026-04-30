@@ -3,17 +3,23 @@ from __future__ import annotations
 # incubator.py
 # Bidirectional serial thread for the Arduino incubator board.
 #
-# The Arduino outputs one line every ~5 seconds:
-#   CO2: 412 ppm | Temp: 36.85 C | RH: 72.34 % | Setpoint: 37.00 C | Heater PWM: 47
+# The Arduino outputs two line types:
 #
-# Commands we send TO the Arduino (all lowercase — Arduino calls cmd.toLowerCase()):
+#   Every ~250 ms (thermistor / heater):
+#     Thermistor Temp: 36.85 C | Setpoint: 37.00 C | PWM: 47 | SafetyHold: OFF
+#
+#   Every ~5 s (SCD41 CO2 sensor):
+#     CO2: 412 ppm | SCD41 Temp: 25.30 C | RH: 72.34 %
+#
+# Commands we send TO the Arduino (all lowercase):
 #   pump1 forward <ms>   — run pump 1 forward for <ms> milliseconds
 #   pump1 reverse <ms>   — run pump 1 reverse for <ms> milliseconds
 #   stop1                — stop pump 1
 #   pump2 <ms>           — run pump 2 for <ms> milliseconds (single direction)
 #   stop2                — stop pump 2
 #   stopall              — stop all pumps
-#   setpoint <temp>      — update heater target temperature
+#   setpoint <temp>      — update heater target temperature (36.5–37.3 °C)
+#   offset <val>         — adjust thermistor reading by <val> °C
 
 import queue
 import re
@@ -28,15 +34,24 @@ except Exception:
     HAS_SERIAL = False
 
 
-# Matches the Arduino's output line format (no Error or Pump fields in new firmware)
-INCUBATOR_PATTERN = re.compile(
-    r"CO2:\s*(\d+)\s*ppm"
-    r"\s*\|\s*Temp:\s*([-\d\.]+)\s*C"
-    r"\s*\|\s*RH:\s*([-\d\.]+)\s*%"
+# Thermistor / heater line (~250 ms cadence)
+PATTERN_THERM = re.compile(
+    r"Thermistor Temp:\s*([-\d\.]+)\s*C"
     r"\s*\|\s*Setpoint:\s*([-\d\.]+)\s*C"
-    r"\s*\|\s*Heater PWM:\s*(\d+)",
+    r"\s*\|\s*PWM:\s*(\d+)"
+    r"\s*\|\s*SafetyHold:\s*(\w+)",
     re.IGNORECASE,
 )
+
+# SCD41 CO2/RH line (~5 s cadence); SCD41 Temp is ignored — thermistor is used for control
+PATTERN_SCD41 = re.compile(
+    r"CO2:\s*(\d+)\s*ppm"
+    r"\s*\|\s*SCD41 Temp:\s*[-\d\.]+\s*C"
+    r"\s*\|\s*RH:\s*([-\d\.]+)\s*%",
+    re.IGNORECASE,
+)
+
+INCUBATOR_PATTERN = PATTERN_SCD41  # legacy alias
 
 
 class IncubatorSerial(threading.Thread):
@@ -63,6 +78,7 @@ class IncubatorSerial(threading.Thread):
         self._cmd_queue: queue.Queue[str] = queue.Queue()
         self._stop_event = threading.Event()
         self.ser = None
+        self._state: dict = {}  # merged state from both line types
 
     # ------------------------------------------------------------------
     # Public API (call from GUI thread — thread-safe)
@@ -132,18 +148,24 @@ class IncubatorSerial(threading.Thread):
                 if not raw:
                     continue
                 line = raw.decode(errors="replace").strip()
-                match = INCUBATOR_PATTERN.search(line)
-                if match:
-                    self.q.put((
-                        "data",
-                        {
-                            "co2":        float(match.group(1)),
-                            "temp":       float(match.group(2)),
-                            "rh":         float(match.group(3)),
-                            "setpoint":   float(match.group(4)),
-                            "heater_pwm": int(match.group(5)),
-                        },
-                    ))
+
+                therm = PATTERN_THERM.search(line)
+                scd = PATTERN_SCD41.search(line)
+
+                if therm:
+                    self._state.update({
+                        "temp":        float(therm.group(1)),
+                        "setpoint":    float(therm.group(2)),
+                        "heater_pwm":  int(therm.group(3)),
+                        "safety_hold": therm.group(4).upper() == "ON",
+                    })
+                    self.q.put(("data", dict(self._state)))
+                elif scd:
+                    self._state.update({
+                        "co2": float(scd.group(1)),
+                        "rh":  float(scd.group(2)),
+                    })
+                    self.q.put(("data", dict(self._state)))
                 elif line:
                     self.q.put(("raw", line))
 
