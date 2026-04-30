@@ -103,8 +103,17 @@ class StageGUI2(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Auto in-vitro v3")
-        self.resize(1450, 900)
-        self.setMinimumSize(1100, 700)
+
+        # Scale all hardcoded pixel sizes to the available screen space.
+        # sf=1.0 on the design screen (1450x900 window fits comfortably);
+        # smaller screens get a proportionally smaller sf so nothing overflows.
+        _screen = QApplication.primaryScreen().availableGeometry()
+        _sf = min(_screen.width() / 1600.0, _screen.height() / 960.0)
+        self._sf = max(0.65, min(1.0, _sf))
+        s = lambda n: int(n * self._sf)
+
+        self.resize(s(1450), s(900))
+        self.setMinimumSize(s(1100), s(700))
 
         # multiprocessing context
         self.ctx = mp.get_context("spawn")
@@ -164,7 +173,7 @@ class StageGUI2(QMainWindow):
         self.tabs.setCurrentIndex(0)
         
         self.btn_open_guide =  QPushButton("System Setup & Guided Tour")
-        self.btn_open_guide.setFixedHeight(36)
+        self.btn_open_guide.setFixedHeight(s(36))
         self.btn_open_guide.setStyleSheet("""
             QPushButton {
                 background-color: #2a2f3a;
@@ -210,14 +219,14 @@ class StageGUI2(QMainWindow):
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["Simulator", "Board"])
-        self.mode_combo.setMinimumWidth(120)
+        self.mode_combo.setMinimumWidth(s(120))
 
         self.btn_refresh = QPushButton("Refresh Ports")
         self.btn_connect = QPushButton("Connect")
 
         self.motion_target_combo = QComboBox()
         self.motion_target_combo.addItems(["Both", "Needle", "Camera"])
-        self.motion_target_combo.setMinimumWidth(120)
+        self.motion_target_combo.setMinimumWidth(s(120))
 
         self.motion_hint = QLabel("Connect to enable movement.")
         self.motion_hint.setStyleSheet("color: #ffaa00; font-weight: bold;")
@@ -244,16 +253,16 @@ class StageGUI2(QMainWindow):
         conn_bottom.setColumnStretch(3, 1)  # absorb leftover space
         
         self.needle_port_combo = QComboBox()
-        self.needle_port_combo.setMinimumWidth(240)
-        
+        self.needle_port_combo.setMinimumWidth(s(240))
+
         self.camera_stage_port_combo = QComboBox()
-        self.camera_stage_port_combo.setMinimumWidth(240)
+        self.camera_stage_port_combo.setMinimumWidth(s(240))
         
         self.needle_status_label = QLabel("Needle Stage: Disconnected")
-        self.needle_status_label.setMinimumWidth(220)
+        self.needle_status_label.setMinimumWidth(s(220))
         
         self.camera_stage_status_label = QLabel("Camera Stage: Disconnected")
-        self.camera_stage_status_label.setMinimumWidth(220)
+        self.camera_stage_status_label.setMinimumWidth(s(220))
         
         conn_bottom.addWidget(QLabel("Needle Stage Port"), 0, 0)
         conn_bottom.addWidget(self.needle_port_combo, 0, 1)
@@ -291,8 +300,8 @@ class StageGUI2(QMainWindow):
         self.xy_plot.setLabel("left", "Y (mm)", color="#cccccc")
         self.xy_plot.setLabel("bottom", "X (mm)", color="#cccccc")
         self.xy_plot.invertY(True)
-        self.xy_plot.setMinimumHeight(480)
-        self.xy_plot.setMaximumHeight(550)
+        self.xy_plot.setMinimumHeight(s(480))
+        self.xy_plot.setMaximumHeight(s(550))
         self.xy_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         # Fixed-size plot window (will pan when needed):
@@ -331,7 +340,7 @@ class StageGUI2(QMainWindow):
 
 
         pos_box = QGroupBox("Position")
-        pos_box.setFixedHeight(65)
+        pos_box.setFixedHeight(s(65))
         pos_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         pos_layout = QHBoxLayout(pos_box)
         pos_layout.setContentsMargins(12, 8, 12, 8)
@@ -342,7 +351,7 @@ class StageGUI2(QMainWindow):
         self.lab_a = QLabel("0.000")
 
         for lab in (self.lab_x, self.lab_y, self.lab_z, self.lab_a):
-            lab.setMinimumWidth(80)
+            lab.setMinimumWidth(s(80))
             lab.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         pos_layout.addWidget(QLabel("X ="))
@@ -375,7 +384,7 @@ class StageGUI2(QMainWindow):
         camera_controls_col.addWidget(QLabel("Select Camera"))
         
         self.camera_combo = QComboBox()
-        self.camera_combo.setMinimumWidth(140)
+        self.camera_combo.setMinimumWidth(s(140))
         camera_controls_col.addWidget(self.camera_combo)
         
         self.btn_camera_refresh = QPushButton("Refresh")
@@ -383,7 +392,7 @@ class StageGUI2(QMainWindow):
         self.btn_camera_view = QPushButton("Start View")
         
         for btn in (self.btn_camera_refresh, self.btn_camera_connect, self.btn_camera_view):
-            btn.setFixedWidth(90)
+            btn.setFixedWidth(s(90))
         
         camera_controls_col.addWidget(self.btn_camera_refresh)
         camera_controls_col.addWidget(self.btn_camera_connect)
@@ -397,13 +406,13 @@ class StageGUI2(QMainWindow):
         
         camera_controls_widget = QWidget()
         camera_controls_widget.setLayout(camera_controls_col)
-        camera_controls_widget.setFixedWidth(170)
+        camera_controls_widget.setFixedWidth(s(170))
         
         # right side: preview
         self.camera_view = QLabel("No camera connected")
         self.camera_view.setAlignment(Qt.AlignCenter)
 
-        self.camera_view.setFixedSize(570, 570)
+        self.camera_view.setFixedSize(s(570), s(570))
         self.camera_view.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.camera_view.setStyleSheet("""
             QLabel {
@@ -442,7 +451,7 @@ class StageGUI2(QMainWindow):
 
         def mk(btn_text: str, w: int = 58, h: int = 38) -> QPushButton:
             b = QPushButton(btn_text)
-            b.setFixedSize(w, h)
+            b.setFixedSize(s(w), s(h))
             return b
 
         self.btn_ul = mk("↖")
@@ -490,13 +499,13 @@ class StageGUI2(QMainWindow):
         self.controller_status.setStyleSheet("color: #bfc7d5;")
         
         self.controller_index_combo = QComboBox()
-        self.controller_index_combo.setMinimumWidth(220)
+        self.controller_index_combo.setMinimumWidth(s(220))
         
         self.btn_refresh_controller = QPushButton("Refresh Controllers")
-        self.btn_refresh_controller.setFixedWidth(140)
-        
+        self.btn_refresh_controller.setFixedWidth(s(140))
+
         self.btn_controller_toggle = QPushButton("Connect Controller")
-        self.btn_controller_toggle.setFixedWidth(150)
+        self.btn_controller_toggle.setFixedWidth(s(150))
         
         controller_top.addWidget(QLabel("Controller"))
         controller_top.addWidget(self.controller_index_combo)
@@ -519,7 +528,7 @@ class StageGUI2(QMainWindow):
         rel_label = QLabel("Relative Move")
 
         self.rel_help = QPushButton("?")
-        self.rel_help.setFixedSize(16, 16)
+        self.rel_help.setFixedSize(s(16), s(16))
         self.rel_help.setStyleSheet("""
             QPushButton {
                 color: #aaaaaa;
@@ -547,13 +556,13 @@ class StageGUI2(QMainWindow):
         self.rel_y = QLineEdit("0")
         self.rel_z = QLineEdit("0")
         self.rel_z2 = QLineEdit("0")
-        self.rel_x.setFixedWidth(55)
-        self.rel_y.setFixedWidth(55)
-        self.rel_z.setFixedWidth(55)
-        self.rel_z2.setFixedWidth(55)
+        self.rel_x.setFixedWidth(s(55))
+        self.rel_y.setFixedWidth(s(55))
+        self.rel_z.setFixedWidth(s(55))
+        self.rel_z2.setFixedWidth(s(55))
 
         self.btn_rel_move = QPushButton("Move")
-        self.btn_rel_move.setFixedWidth(70)
+        self.btn_rel_move.setFixedWidth(s(70))
 
         rel_layout.addWidget(QLabel("ΔX"))
         rel_layout.addWidget(self.rel_x)
@@ -591,7 +600,7 @@ class StageGUI2(QMainWindow):
         abs_label = QLabel("Absolute Move")
 
         self.abs_help = QPushButton("?")
-        self.abs_help.setFixedSize(16, 16)
+        self.abs_help.setFixedSize(s(16), s(16))
         self.abs_help.setStyleSheet("""
             QPushButton {
                 color: #aaaaaa;
@@ -619,13 +628,13 @@ class StageGUI2(QMainWindow):
         self.abs_y = QLineEdit("0")
         self.abs_z = QLineEdit("0")
         self.abs_z2 = QLineEdit("0")
-        self.abs_x.setFixedWidth(55)
-        self.abs_y.setFixedWidth(55)
-        self.abs_z.setFixedWidth(55)
-        self.abs_z2.setFixedWidth(55)
+        self.abs_x.setFixedWidth(s(55))
+        self.abs_y.setFixedWidth(s(55))
+        self.abs_z.setFixedWidth(s(55))
+        self.abs_z2.setFixedWidth(s(55))
 
         self.btn_abs_move = QPushButton("Go to")
-        self.btn_abs_move.setFixedWidth(70)
+        self.btn_abs_move.setFixedWidth(s(70))
 
         abs_layout.addWidget(QLabel("X"))
         abs_layout.addWidget(self.abs_x)
@@ -663,7 +672,7 @@ class StageGUI2(QMainWindow):
         ctrl_label = QLabel("Step / Feed")
 
         self.ctrl_help = QPushButton("?")
-        self.ctrl_help.setFixedSize(16, 16)
+        self.ctrl_help.setFixedSize(s(16), s(16))
         self.ctrl_help.setStyleSheet("""
             QPushButton {
                 color: #aaaaaa;
@@ -692,7 +701,7 @@ class StageGUI2(QMainWindow):
         self.in_z2 = QLineEdit("0.050")
 
         self.in_feed = QLineEdit("3000")
-        self.in_feed.setFixedWidth(80)
+        self.in_feed.setFixedWidth(s(80))
 
         feed_row = QHBoxLayout()
         feed_row.addWidget(self.in_feed)
@@ -715,7 +724,7 @@ class StageGUI2(QMainWindow):
         set_home_layout.setSpacing(2)
 
         self.set_home_help = QPushButton("?")
-        self.set_home_help.setFixedSize(16, 16)
+        self.set_home_help.setFixedSize(s(16), s(16))
         self.set_home_help.setStyleSheet("""
             QPushButton {
                 color: #aaaaaa;
@@ -741,7 +750,7 @@ class StageGUI2(QMainWindow):
         machine_home_layout.setSpacing(2)
 
         self.machine_home_help = QPushButton("?")
-        self.machine_home_help.setFixedSize(16, 16)
+        self.machine_home_help.setFixedSize(s(16), s(16))
         self.machine_home_help.setStyleSheet(self.set_home_help.styleSheet())
 
         machine_home_layout.addWidget(self.btn_home)
@@ -799,13 +808,13 @@ class StageGUI2(QMainWindow):
         msg_top.addStretch()
 
         self.btn_clear_messages = QPushButton("Clear Messages")
-        self.btn_clear_messages.setFixedWidth(120)
+        self.btn_clear_messages.setFixedWidth(s(120))
         msg_top.addWidget(self.btn_clear_messages)
 
         self.msg_box = QPlainTextEdit()
         self.msg_box.setReadOnly(True)
-        self.msg_box.setMinimumHeight(90)
-        self.msg_box.setMaximumHeight(120)
+        self.msg_box.setMinimumHeight(s(90))
+        self.msg_box.setMaximumHeight(s(120))
 
         msg_layout.addLayout(msg_top)
         msg_layout.addWidget(self.msg_box)
@@ -2034,8 +2043,6 @@ def main():
     except RuntimeError:
         pass
 
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     app = QApplication(sys.argv)
     win = StageGUI2()
     win.show()
