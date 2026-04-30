@@ -2034,6 +2034,8 @@ def main():
     except RuntimeError:
         pass
 
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     app = QApplication(sys.argv)
     win = StageGUI2()
     win.show()

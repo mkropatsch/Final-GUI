@@ -22,6 +22,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -165,6 +166,71 @@ def list_ports() -> list[str]:
     return [p.device for p in serial.tools.list_ports.comports()]
 
 
+class SerialMonitorWindow(QWidget):
+    """Floating serial monitor popup — shows raw Arduino output and lets you send commands."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Window)
+        self.setWindowTitle("Serial Monitor")
+        self.resize(620, 420)
+        self._reader = None
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        self._output = QTextEdit()
+        self._output.setReadOnly(True)
+        self._output.setStyleSheet(
+            "background-color: #0d1b2a; color: #c8d8e8; font-family: Consolas, monospace; font-size: 12px;"
+        )
+        layout.addWidget(self._output, 1)
+
+        send_row = QHBoxLayout()
+        self._input = QLineEdit()
+        self._input.setPlaceholderText("Type command and press Enter or Send…")
+        self._input.returnPressed.connect(self._send)
+        self._btn_send = QPushButton("Send")
+        self._btn_send.clicked.connect(self._send)
+        self._btn_clear = QPushButton("Clear")
+        self._btn_clear.clicked.connect(self._output.clear)
+        send_row.addWidget(self._input, 1)
+        send_row.addWidget(self._btn_send)
+        send_row.addWidget(self._btn_clear)
+        layout.addLayout(send_row)
+
+        self.setStyleSheet(
+            """
+            QWidget { background-color: #0f1e2e; color: #d8e2ee; }
+            QPushButton {
+                background-color: #4b617b; color: white; border: none;
+                border-radius: 4px; padding: 6px 12px;
+            }
+            QPushButton:hover { background-color: #5d7694; }
+            QLineEdit {
+                background-color: #102030; color: #d8e2ee;
+                border: 1px solid #48607d; border-radius: 4px; padding: 4px 8px;
+            }
+            """
+        )
+
+    def set_reader(self, reader) -> None:
+        self._reader = reader
+
+    def append_line(self, line: str) -> None:
+        self._output.append(line)
+        sb = self._output.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def _send(self) -> None:
+        text = self._input.text().strip()
+        if not text:
+            return
+        self._input.clear()
+        self.append_line(f"> {text}")
+        if self._reader is not None and hasattr(self._reader, "send_command"):
+            self._reader.send_command(text)
+
+
 class SensorCard(QFrame):
     def __init__(self, title: str, value: str, accent: str):
         super().__init__()
@@ -270,6 +336,8 @@ class SensorsTab(QWidget):
         self.rh_series = deque(maxlen=600)
         self.o2_series = deque(maxlen=600)
 
+        self._serial_monitor = SerialMonitorWindow()
+
         self._build_ui()
         self.refresh_ports()
 
@@ -293,6 +361,7 @@ class SensorsTab(QWidget):
         self.btn_connect = QPushButton("Connect")
         self.btn_record = QPushButton("Start Recording")
         self.btn_clear = QPushButton("Clear Graphs")
+        self.btn_serial_monitor = QPushButton("Serial Monitor")
         self.conn_status = QLabel("Not connected")
         self.conn_status.setMinimumWidth(240)
         self.conn_status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -303,6 +372,7 @@ class SensorsTab(QWidget):
         conn_layout.addWidget(self.btn_connect)
         conn_layout.addWidget(self.btn_record)
         conn_layout.addWidget(self.btn_clear)
+        conn_layout.addWidget(self.btn_serial_monitor)
         conn_layout.addSpacing(12)
         conn_layout.addWidget(self.conn_status)
         conn_layout.addStretch()
@@ -440,6 +510,7 @@ class SensorsTab(QWidget):
         self.btn_connect.clicked.connect(self.toggle_connect)
         self.btn_record.clicked.connect(self.toggle_recording)
         self.btn_clear.clicked.connect(self._clear_graphs)
+        self.btn_serial_monitor.clicked.connect(self._open_serial_monitor)
 
         self.setStyleSheet(
             """
@@ -529,6 +600,7 @@ class SensorsTab(QWidget):
         self.reader.start()
         if isinstance(self.reader, IncubatorSerial):
             self.reader.set_setpoint(self._last_setpoint)
+        self._serial_monitor.set_reader(self.reader)
         self.incubator_connected.emit(self.reader)
         self.btn_connect.setText("Disconnect")
         self.conn_status.setText(f"Connecting to {port}…")
@@ -708,16 +780,22 @@ class SensorsTab(QWidget):
         except Exception as e:
             self.conn_status.setText(f"Log write error: {e}")
 
+    def _open_serial_monitor(self) -> None:
+        self._serial_monitor.set_reader(self.reader)
+        self._serial_monitor.show()
+        self._serial_monitor.raise_()
+
     def _pump_queue(self) -> None:
         try:
             while True:
                 kind, payload = self.q.get_nowait()
                 if kind == "status":
                     self.conn_status.setText(str(payload))
+                    self._serial_monitor.append_line(f"[status] {payload}")
                     if str(payload).lower() in {"disconnected", "simulation stopped"}:
                         self.btn_connect.setText("Connect")
                 elif kind == "raw":
-                    pass
+                    self._serial_monitor.append_line(str(payload))
                 elif kind == "data":
                     self._update_readings(payload)
         except queue.Empty:
