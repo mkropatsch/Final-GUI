@@ -24,7 +24,7 @@ import queue
 
 class XboxController:
     def __init__(self, q_from_gui_to_ctrl, q_to_gantry,
-                 deadzone: float = 0.10, joystick_index: int = 0) -> None:
+                 deadzone: float = 0.20, joystick_index: int = 0) -> None:
         self.q_from_gui = q_from_gui_to_ctrl
         self.q_to_gantry = q_to_gantry
         self.deadzone = deadzone

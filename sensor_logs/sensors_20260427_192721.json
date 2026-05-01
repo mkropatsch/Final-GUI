@@ -1,0 +1,65 @@
+{
+  "session_start": "2026-04-27 19:27:21",
+  "readings": [
+    {
+      "timestamp": "2026-04-27 19:27:28",
+      "elapsed_s": 20.6,
+      "co2": 475.0,
+      "temp": 25.02,
+      "rh": 30.1,
+      "setpoint": 37.0,
+      "heater_pwm": 255,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low",
+        "heater_saturated"
+      ]
+    },
+    {
+      "timestamp": "2026-04-27 19:27:29",
+      "elapsed_s": 21.2,
+      "co2": 462.0,
+      "temp": 24.72,
+      "rh": 30.95,
+      "setpoint": 37.0,
+      "heater_pwm": 255,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low",
+        "heater_saturated"
+      ]
+    },
+    {
+      "timestamp": "2026-04-27 19:27:34",
+      "elapsed_s": 26.2,
+      "co2": 458.0,
+      "temp": 24.49,
+      "rh": 31.52,
+      "setpoint": 37.0,
+      "heater_pwm": 255,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low",
+        "heater_saturated"
+      ]
+    },
+    {
+      "timestamp": "2026-04-27 19:27:39",
+      "elapsed_s": 31.2,
+      "co2": 473.0,
+      "temp": 24.32,
+      "rh": 32.1,
+      "setpoint": 37.0,
+      "heater_pwm": 255,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low",
+        "heater_saturated"
+      ]
+    }
+  ]
+}

@@ -38,10 +38,12 @@ FIRMWARE_IS_MARLIN = True  # Using marlin firmware
 class StepSizes: # stores movement increment sizes , not actual machine position, just how big jog should be
     xy_step: float = 0.500 # xy move per jog unit
     z_step: float = 0.10 # z move per jog unit
+    a_step: float = 0.10 # a (Z2 / second needle) move per jog unit
     e_step: float = 0.020 # e move per jog unit
     def clamp(self): # safety limiter, if there is a crazy step size, force it to stay inside an allowed range
         self.xy_step = max(0.005, min(self.xy_step, 5.0)) # xy range
         self.z_step  = max(0.001, min(self.z_step,  2.0)) # z range
+        self.a_step  = max(0.001, min(self.a_step,  2.0)) # a range
         self.e_step  = max(0.001, min(self.e_step,  1.0)) # e range
 # Big picture: stores current jog size settings and prevent unreasonable settings
 
@@ -52,6 +54,7 @@ class GantryState: # stores system's current idea of the gantry state, when prog
     y: float = 0.0
     z: float = 0.0
     e: float = 0.0
+    a: float = 0.0
     steps: StepSizes = field(default_factory=StepSizes) # takes from StepSize class
     feed: int = 3000 # movement speed
     pump_0: int = 0 # pump state -> 0 = off
@@ -60,6 +63,23 @@ class GantryState: # stores system's current idea of the gantry state, when prog
 
 # class vs dataclass: class = person (can do things), dataclass = ID card (just holds info)
 
+@dataclass
+class MotionChannel:
+    name: str
+    board: object | None = None
+    state: GantryState = field(default_factory=GantryState)
+    dx: float = 0.0
+    dy: float = 0.0
+    dz: float = 0.0
+    de: float = 0.0
+    da: float = 0.0
+    connected: bool = False
+    port: str | None = None
+    flip_x: float = +1.0
+    flip_y: float = -1.0
+    flip_z: float = -1.0
+    flip_a: float = -1.0
+    flip_e: float = +1.0
 
 # --------------------------- hardware backends --------------------------------
 
@@ -87,7 +107,7 @@ class StepperControlBoard: # class (unlike dataclass) can have behavior function
         import serial as _serial
         self.ser = _serial.Serial(self.port, baudrate=self.baudrate, timeout=1)
         self._setup() # after connecting, sends setup commands
-        self.x = self.y = self.z = self.e = 0.0 # creates board object's internal software position values, not actually read from the board
+        self.x = self.y = self.z = self.e = self.a = 0.0 # creates board object's internal software position values, not actually read from the board
 
 
     def _probe(self) -> Optional[str]:
@@ -160,7 +180,16 @@ class StepperControlBoard: # class (unlike dataclass) can have behavior function
             out.extend(self._read_available_lines())
             time.sleep(0.01)
         return out
-    ## END new message reply
+
+    def wait_for_ok(self, timeout_s: float = 60.0) -> bool:
+        """Block until the board sends an 'ok' line or timeout_s elapses. Returns True if ok received."""
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < timeout_s:
+            for line in self._read_available_lines():
+                if line.strip().lower().startswith("ok"):
+                    return True
+            time.sleep(0.01)
+        return False
 
 
     def quick_stop(self):
@@ -183,6 +212,7 @@ class StepperControlBoard: # class (unlike dataclass) can have behavior function
         self._send_line(f"G1 F{int(feed)} " + " ".join(f"{k}{v:.4f}" for k, v in axes.items())) #G1 -> linear move
         self.x += axes.get("X", 0.0); self.y += axes.get("Y", 0.0) # code updates stored position value
         self.z += axes.get("Z", 0.0); self.e += axes.get("E", 0.0)
+        self.a += axes.get("A", 0.0)
 
 
     def abs_move(self, axes: Dict[str, float], feed: int): #performs absolute move
@@ -195,6 +225,7 @@ class StepperControlBoard: # class (unlike dataclass) can have behavior function
         self.y = axes.get("Y", self.y)
         self.z = axes.get("Z", self.z)
         self.e = axes.get("E", self.e)
+        self.a = axes.get("A", self.a)
 
 
     def home(self): # switches to absolute, sends home, switches back to relative
@@ -204,8 +235,8 @@ class StepperControlBoard: # class (unlike dataclass) can have behavior function
     # ----- User Set Home ------
     def set_home(self):
         # Set current position as the new software zero
-        self._send_line("G92 X0 Y0 Z0 E0")
-        self.x = self.y = self.z = self.e = 0.0
+        self._send_line("G92 X0 Y0 Z0 E0 A0")
+        self.x = self.y = self.z = self.e = self.a = 0.0
 
 
 # -------- Need to fill this so we can ask the board for data ------- (Fix)
@@ -225,7 +256,7 @@ class StepperControlBoardSimulator: #pretend machine if board isn't connected
 
     def __init__(self, verbose: bool = False): # start the pretend machine at zero, with the pump off
         self.verbose = verbose
-        self.x = self.y = self.z = self.e = 0.0
+        self.x = self.y = self.z = self.e = self.a = 0.0
         self.pump = {0: 0}
 
 
@@ -251,6 +282,7 @@ class StepperControlBoardSimulator: #pretend machine if board isn't connected
         self._log(f"G91; G1 F{feed} " + " ".join(f"{k}{v:.4f}" for k, v in axes.items())) #log the move
         self.x += axes.get("X", 0.0); self.y += axes.get("Y", 0.0) #updates stored position
         self.z += axes.get("Z", 0.0); self.e += axes.get("E", 0.0)
+        self.a += axes.get("A", 0.0)
 
 
     def abs_move(self, axes: Dict[str, float], feed: int): # fake absolute move function
@@ -261,6 +293,7 @@ class StepperControlBoardSimulator: #pretend machine if board isn't connected
         self.y = axes.get("Y", self.y)
         self.z = axes.get("Z", self.z)
         self.e = axes.get("E", self.e)
+        self.a = axes.get("A", self.a)
 
 
     def home(self): # fake homing
@@ -269,23 +302,27 @@ class StepperControlBoardSimulator: #pretend machine if board isn't connected
 
 # ----- New - User Set Home -----
     def set_home(self):
-        self._log("G92 X0 Y0 Z0 E0")
-        self.x = self.y = self.z = self.e = 0.0
+        self._log("G92 X0 Y0 Z0 E0 A0")
+        self.x = self.y = self.z = self.e = self.a = 0.0
 
 
 # ------- Same as before, currently does nothing (Fix) ------ (but _publish_state still reads position from simulator object)
 # Doesn't matter as much because no board is connected
+    def wait_for_ok(self, timeout_s: float = 60.0) -> bool:
+        self._log("M400 (simulated ok)")
+        return True
+
     def request_data(self): pass
 
 
 
 # ------------------------------ Gantry system ---------------------------------
 
-class GantrySystem: # basically the manager
+class GantrySystem:  # basically the manager
     """
     Consumes (GUI):
       - {"type":"set_steps"|"set_feed"|"home_all"|"gcode"|"fan_set"|"btn_estop"}
-      - {"type":"gantry_cmd","cmd": "move_rel"|"move_abs"|"move_steps_xy"}
+      - {"type":"gantry_cmd","cmd": "move_rel"|"move_abs"|"move_steps_xy"|"set_home"}
     Consumes (Controller):
       - {"type":"input","cmd": "xy_motion"|"z_motion"|"e_motion", "value": tuple}
     Produces (GUI):
@@ -293,198 +330,344 @@ class GantrySystem: # basically the manager
       - {"type":"message","level": "...", "text": "..."}
     """
 
-
     def __init__(self, q_to_gui, q_from_gui, q_from_controller,
                  simulate: bool = False,
-                 port: str | None = None,
+                 ports: dict[str, str | None] | None = None,
                  motion_dt: float = 0.05,
                  gui_dt: float = 0.20,
-                 base_feed: int = 3000): # Setup for the whole backend loop
-        self.q_to_gui = q_to_gui # send information back to the GUI (backend's outbox)
-        self.q_from_gui = q_from_gui # recieve commands from the GUI, buttons, settings, etc
-        self.q_from_controller = q_from_controller # recieves commnads from the GUI
-        self._port = port 
+                 base_feed: int = 3000):
+        self.q_to_gui = q_to_gui
+        self.q_from_gui = q_from_gui
+        self.q_from_controller = q_from_controller
 
-        self.motion_dt = motion_dt # stores how often motion is flushed (currently 50 ms)
-        self.gui_dt = gui_dt # how often backend sends state updates to the GUI (currently 200 ms, 5 times per second)
-        self.feed = base_feed # stores current speed setting (currently 3000)
-        self.steps = StepSizes() # reads the earlier dataclass StepSizes
-        self.state = GantryState(steps=self.steps, feed=self.feed) # reads the dataclass GantryState
+        self._ports = ports or {"needle": None, "camera": None}
+
+        self.motion_dt = motion_dt
+        self.gui_dt = gui_dt
+        self.feed = base_feed
+        self.steps = StepSizes()
+
+        # Keep one top-level state for backward compatibility with existing GUI
+        self.state = GantryState(steps=self.steps, feed=self.feed)
 
         # screen coordinates: +Y up → invert machine Y if needed
         self.flip_x = +1.0
-        self.flip_y = -1.0 # currently y is inverted on the coordinate plane
-        self.flip_z = +1.0
+        self.flip_y = -1.0
+        self.flip_z = -1.0
+        self.flip_a = -1.0
         self.flip_e = +1.0
 
-        self._dx = self._dy = self._dz = self._de = 0.0 # temporary stored motion amounts, stores before sending manual inputs
+        self._simulate_flag = simulate
 
-        self._simulate_flag = simulate #stores if asked for simulator mode
-        self._board = None # placeholder for board object (either StepperControlBoard or StepperControlBoardSimulator)
-
-
+        # Two independent motion channels
+        self.channels: dict[str, MotionChannel] = {
+            "needle": MotionChannel(
+                name="needle",
+                state=GantryState(steps=self.steps, feed=self.feed),
+                port=self._ports.get("needle"),
+                flip_x=-1.0,
+                flip_y=+1.0,
+            ),
+            "camera": MotionChannel(
+                name="camera",
+                state=GantryState(steps=self.steps, feed=self.feed),
+                port=self._ports.get("camera"),
+            ),
+        }
 
     # ----------------------------- main loop ---------------------------------
 
+    def run(self) -> None:
+        self._connect_channels()
+        t_motion = time.monotonic()
+        t_gui = time.monotonic()
+        self._send_message("info", "Gantry started.")
 
-    def run(self) -> None: # main backend loop
-        board = self._try_board() # choses real board or simulator
-        self._board = board # stores that choice
-        t_motion = time.monotonic() # creates motion flush timing
-        t_gui = time.monotonic() # creates GUI update timing
-        self._send_message("info", "Gantry started.") # startup message to GUI
+        while True:
+            self._drain_gui()
+            self._drain_controller()
 
-        while True: # continuous engine loop
-            self._drain_gui(board)         # settings, abs moves, pump, estop, etc. for GUI
-            self._drain_controller()       # manual-jog inputs from controller, read manual motion input and add to motion buckets
+            now = time.monotonic()
 
-            now = time.monotonic() #gets the current time for the timing checks
             if now - t_motion >= self.motion_dt:
-                self._flush_motion(board); t_motion = now # if it's been at least 50 ms since last flush, send collected motion now
-            if now - t_gui >= self.gui_dt: # updates the GUI
+                for ch in self.channels.values():
+                    self._flush_motion(ch)
+                t_motion = now
 
-                # ------ currently does nothing (Fix) -----
-                # wants to ask for hardware data
-                try: board.request_data()
-                except Exception as e: self._send_message("warning", f"request_data failed: {e}")
-                self._publish_state(board); t_gui = now # sends current state snapshot to GUI and resets timer
+            if now - t_gui >= self.gui_dt:
+                for ch in self.channels.values():
+                    if ch.connected and ch.board is not None:
+                        try:
+                            ch.board.request_data()
+                        except Exception as e:
+                            if not self._check_disconnect(ch, e):
+                                self._send_message("warning", f"{ch.name.capitalize()} request_data failed: {e}")
 
-            time.sleep(0.001) # loop pauses 1 ms per cycle
+                self._publish_state()
+                t_gui = now
 
+            time.sleep(0.001)
 
+    def _connect_channels(self) -> None:
+        for name, ch in self.channels.items():
+            if self._simulate_flag or serial is None:
+                ch.board = StepperControlBoardSimulator()
+                ch.connected = True
+                self._send_message("warning", f"{name.capitalize()} using simulator backend.")
+                continue
 
-    def _try_board(self): # helps chooses real board or simulator
-        if self._simulate_flag or serial is None:
-            self._send_message("warning", "Using simulator backend.")
-            return StepperControlBoardSimulator()
-        try:
-            return StepperControlBoard(port=self._port)
-        except Exception as e:
-            self._send_message("warning", f"No board detected, using simulator: {e}")
-            return StepperControlBoardSimulator()
+            if not ch.port:
+                ch.board = None
+                ch.connected = False
+                self._send_message("warning", f"{name.capitalize()} board not connected (no port selected).")
+                continue
 
+            try:
+                ch.board = StepperControlBoard(port=ch.port)
+                ch.connected = True
+                self._send_message("info", f"{name.capitalize()} board connected on {ch.port}.")
+            except Exception as e:
+                ch.board = None
+                ch.connected = False
+                self._send_message("warning", f"{name.capitalize()} board failed to connect: {e}")
+
+    # ------------------------------ helpers ----------------------------------
+
+    def _normalize_target(self, raw_target: str | None) -> str:
+        target = str(raw_target or "needle").strip().lower()
+        if target in ("needle", "camera", "both"):
+            return target
+        return "needle"
+
+    def _target_channels(self, raw_target: str | None) -> list[MotionChannel]:
+        target = self._normalize_target(raw_target)
+        if target == "both":
+            return [self.channels["needle"], self.channels["camera"]]
+        return [self.channels[target]]
 
     # ------------------------------ inbound ----------------------------------
-# functions are where incoming messages get turned into actual behavior
 
-    def _drain_gui(self, board) -> None: #handles discrete commands from buttons/forms/messages
+    def _drain_gui(self) -> None:
         try:
             while True:
                 msg = self.q_from_gui.get_nowait()
-                if not isinstance(msg, dict): continue #chekcs if msg is not an instance of a specified class or something
-                typ = msg.get("type") #decides what type of command it is
+                if not isinstance(msg, dict):
+                    continue
 
-                if typ == "gcode": #sends raw G-code
+                typ = msg.get("type")
+                target = self._normalize_target(msg.get("target"))
+                targets = self._target_channels(target)
+
+                if typ == "gcode":
                     cmd = str(msg.get("cmd", "")).strip()
                     if cmd:
+                        for ch in targets:
+                            board = ch.board
+                            if board is None:
+                                continue
+                            try:
+                                if cmd.upper().startswith("M400"):
+                                    try:
+                                        self._flush_motion(ch)
+                                    except Exception:
+                                        pass
+                                    board.send_gcode(cmd)
+                                    if hasattr(board, "wait_for_ok"):
+                                        ok = board.wait_for_ok(timeout_s=60.0)
+                                        if not ok:
+                                            self._send_message("warning", f"{ch.name.capitalize()} M400 timed out — motion may not have finished.")
+                                elif hasattr(board, "send_gcode_with_reply"):
+                                    replies = board.send_gcode_with_reply(cmd, wait_s=0.8)
+                                    for line in replies:
+                                        self._send_message("info", f"[{ch.name.upper()} GCODE] {line}")
+                                else:
+                                    board.send_gcode(cmd)
+
+                            except Exception as e:
+                                if not self._check_disconnect(ch, e):
+                                    self._send_message("error", f"{ch.name.capitalize()} GCODE failed: {e}")
+
+                elif typ == "home_all":
+                    for ch in targets:
+                        board = ch.board
+                        if board is None:
+                            continue
                         try:
-                            # Special-case barrier: ensure any queued move_rel / move_abs have been sent first
-                            if cmd.upper().startswith("M400"): # "finsh moves" forces a pause and wait until all queued movements are completed
-                                try:
-                                    self._flush_motion(board) # <-- only if this exists in the class
-                                except Exception:
-                                    pass
-                            if hasattr(board, "send_gcode_with_reply"):
-                                replies = board.send_gcode_with_reply(cmd, wait_s=0.8)
-                                for line in replies:
-                                    self._send_message("info", f"[GCODE] {line}") # if raw G-code, send it and show any reply lines
-                            else:
-                                board.send_gcode(cmd)
-                                
-                        except Exception as e: self._send_message("error", f"GCODE failed: {e}")
+                            board.home()
+                            ch.dx = ch.dy = ch.dz = ch.de = ch.da = 0.0
+                            ch.state.x = ch.state.y = ch.state.z = ch.state.e = ch.state.a = 0.0
+                            self._send_message("info", f"Homing all axes on {ch.name}.")
+                        except Exception as e:
+                            if not self._check_disconnect(ch, e):
+                                self._send_message("error", f"{ch.name.capitalize()} home failed: {e}")
 
-                elif typ == "home_all": # "home all axes now", triggers board-level home function
-                    try: board.home(); self._send_message("info", "Homing all axes.")
-                    except Exception as e: self._send_message("error", f"Home failed: {e}")
-
-                elif typ == "set_steps" or (typ == "gantry_cmd" and msg.get("cmd") == "set_steps"): # updates jog size settings and keeps in range
-                    for k in ("xy_step", "z_step", "e_step"):
-                        if k in msg: setattr(self.steps, k, float(msg[k]))
+                elif typ == "set_steps" or (typ == "gantry_cmd" and msg.get("cmd") == "set_steps"):
+                    for k in ("xy_step", "z_step", "a_step", "e_step"):
+                        if k in msg:
+                            setattr(self.steps, k, float(msg[k]))
                     self.steps.clamp()
-                    self._send_message("info", f"Steps XY={self.steps.xy_step:.3f} Z={self.steps.z_step:.3f} E={self.steps.e_step:.3f}")
 
-                elif typ == "set_feed" or (typ == "gantry_cmd" and msg.get("cmd") == "set_feed"): # changes feed settings
+                    self.state.steps.xy_step = self.steps.xy_step
+                    self.state.steps.z_step = self.steps.z_step
+                    self.state.steps.a_step = self.steps.a_step
+                    self.state.steps.e_step = self.steps.e_step
+
+                    for ch in self.channels.values():
+                        ch.state.steps.xy_step = self.steps.xy_step
+                        ch.state.steps.z_step = self.steps.z_step
+                        ch.state.steps.a_step = self.steps.a_step
+                        ch.state.steps.e_step = self.steps.e_step
+
+                    self._send_message(
+                        "info",
+                        f"Steps XY={self.steps.xy_step:.3f} Z={self.steps.z_step:.3f} Z2={self.steps.a_step:.3f} E={self.steps.e_step:.3f}"
+                    )
+
+                elif typ == "set_feed" or (typ == "gantry_cmd" and msg.get("cmd") == "set_feed"):
                     self.feed = int(msg.get("feed_mm_min", self.feed))
                     self.state.feed = self.feed
+                    for ch in self.channels.values():
+                        ch.state.feed = self.feed
                     self._send_message("info", f"Feed={self.feed} mm/min")
 
-                elif typ == "fan_set": # set pump/fan output
-                    try:
-                        board.fan_set(int(msg.get("index", PUMP_FAN_INDEX)), int(msg.get("value", 0)))
-                        self.state.pump_0 = int(msg.get("value", 0))
-                    except Exception as e:
-                        self._send_message("error", f"Pump set failed: {e}")
+                elif typ == "fan_set":
+                    for ch in targets:
+                        board = ch.board
+                        if board is None:
+                            continue
+                        try:
+                            board.fan_set(int(msg.get("index", PUMP_FAN_INDEX)), int(msg.get("value", 0)))
+                            ch.state.pump_0 = int(msg.get("value", 0))
+                        except Exception as e:
+                            self._send_message("error", f"{ch.name.capitalize()} pump set failed: {e}")
 
-                elif typ == "btn_estop": # emergency stop branch, clears all queued motion 
-                    try: board.quick_stop()
-                    except Exception: pass
-                    self._dx = self._dy = self._dz = self._de = 0.0
-                    try: board.fan_set(PUMP_FAN_INDEX, 0)
-                    except Exception: pass # apparently this is a bad practice? (Fix)
+                elif typ == "btn_estop":
+                    for ch in self.channels.values():
+                        board = ch.board
+                        if board is None:
+                            continue
+                        try:
+                            board.quick_stop()
+                        except Exception:
+                            pass
+
+                        ch.dx = ch.dy = ch.dz = ch.de = ch.da = 0.0
+
+                        try:
+                            board.fan_set(PUMP_FAN_INDEX, 0)
+                        except Exception:
+                            pass
+
                     self._send_message("warning", "E-STOP: motion aborted, pump off.")
 
-                elif typ == "gantry_cmd": # one message type, multiple motion-related commands
+                elif typ == "gantry_cmd":
                     cmd = str(msg.get("cmd", ""))
 
+                    if cmd == "move_rel":
+                        dx = float(msg.get("dx", 0.0))
+                        dy = float(msg.get("dy", 0.0))
+                        dz = float(msg.get("dz", 0.0))
+                        de = float(msg.get("de", 0.0))
+                        da = float(msg.get("da", 0.0))
 
-                    if cmd == "move_rel": #handles relative moves
-                        dx = float(msg.get("dx", 0.0)); dy = float(msg.get("dy", 0.0))
-                        dz = float(msg.get("dz", 0.0)); de = float(msg.get("de", 0.0))
                         if "feed_mm_min" in msg:
-                            self.feed = int(msg["feed_mm_min"]); self.state.feed = self.feed
-                        self._dx += self.flip_x * dx; self._dy += self.flip_y * dy
-                        self._dz += self.flip_z * dz; self._de += self.flip_e * de
-                        self._send_message("info", f"Queued move_rel dx={dx} dy={dy} dz={dz} de={de}")
+                            self.feed = int(msg["feed_mm_min"])
+                            self.state.feed = self.feed
+                            for ch in self.channels.values():
+                                ch.state.feed = self.feed
 
-                    elif cmd == "move_abs": # handles absolute moves
-                        X = msg.get("X", None); Y = msg.get("Y", None)
-                        Z = msg.get("Z", None); E = msg.get("E", None)
+                        for ch in targets:
+                            ch.dx += ch.flip_x * dx
+                            ch.dy += ch.flip_y * dy
+                            ch.dz += ch.flip_z * dz
+                            ch.de += ch.flip_e * de
+                            ch.da += ch.flip_a * da
+
+                        self._send_message(
+                            "info",
+                            f"Queued {target} move_rel dx={dx} dy={dy} dz={dz} de={de} da={da}"
+                        )
+
+                    elif cmd == "move_abs":
+                        X = msg.get("X", None)
+                        Y = msg.get("Y", None)
+                        Z = msg.get("Z", None)
+                        E = msg.get("E", None)
+                        A = msg.get("A", None)
                         feed = int(msg.get("feed_mm_min", self.feed))
-                        axes = {}
-                        if isinstance(X, (int, float)): axes["X"] = float(X)
-                        if isinstance(Y, (int, float)): axes["Y"] = float(Y)
-                        if isinstance(Z, (int, float)): axes["Z"] = float(Z)
-                        if isinstance(E, (int, float)): axes["E"] = float(E)
-                        try:
-                            board.abs_move(axes, feed)
-                            self.feed = feed; self.state.feed = feed
-                            self._send_message("info", f"ABS move -> {axes} @ F{feed}")
-                        except Exception as e:
-                            self._send_message("error", f"ABS move failed: {e}")
 
-                    elif cmd == "move_steps_xy": # reads integer nx and ny and converts into mm and applies axis flips, part of grid routine
-                        nx = int(msg.get("nx", 0)); ny = int(msg.get("ny", 0))
+                        axes = {}
+                        if isinstance(X, (int, float)):
+                            axes["X"] = float(X)
+                        if isinstance(Y, (int, float)):
+                            axes["Y"] = float(Y)
+                        if isinstance(Z, (int, float)):
+                            axes["Z"] = float(Z)
+                        if isinstance(E, (int, float)):
+                            axes["E"] = float(E)
+                        if isinstance(A, (int, float)):
+                            axes["A"] = float(A)
+
+                        for ch in targets:
+                            board = ch.board
+                            if board is None:
+                                continue
+                            try:
+                                board.abs_move(axes, feed)
+                                ch.state.feed = feed
+                                self._send_message("info", f"{ch.name.capitalize()} ABS move -> {axes} @ F{feed}")
+                            except Exception as e:
+                                if not self._check_disconnect(ch, e):
+                                    self._send_message("error", f"{ch.name.capitalize()} ABS move failed: {e}")
+
+                        self.feed = feed
+                        self.state.feed = feed
+
+                    elif cmd == "move_steps_xy":
+                        nx = int(msg.get("nx", 0))
+                        ny = int(msg.get("ny", 0))
                         dx = float(nx) * self.steps.xy_step
                         dy = float(ny) * self.steps.xy_step
-                        self._dx += self.flip_x * dx
-                        self._dy += self.flip_y * dy
-                        self._send_message("info", f"Queued move_steps_xy: dx={dx:.4f}, dy={dy:.4f} (nx={nx}, ny={ny})")
 
-                    # --- New user set home
+                        for ch in targets:
+                            ch.dx += ch.flip_x * dx
+                            ch.dy += ch.flip_y * dy
+
+                        self._send_message(
+                            "info",
+                            f"Queued {target} move_steps_xy: dx={dx:.4f}, dy={dy:.4f} (nx={nx}, ny={ny})"
+                        )
+
                     elif cmd == "set_home":
-                        try:
-                            board.set_home()
-                            self._dx = self._dy = self._dz = self._de = 0.0
-                            self.state.x = self.state.y = self.state.z = self.state.e = 0.0
-                            self._send_message("info", "Current position set has home (0, 0, 0).")
-                        except Exception as e:
-                            self._send_message("error", f"Set home failed: {e}")
+                        for ch in targets:
+                            board = ch.board
+                            if board is None:
+                                continue
+                            try:
+                                board.set_home()
+                                ch.dx = ch.dy = ch.dz = ch.de = ch.da = 0.0
+                                ch.state.x = ch.state.y = ch.state.z = ch.state.e = ch.state.a = 0.0
+                                self._send_message(
+                                    "info",
+                                    f"{ch.name.capitalize()} current position set as home (0, 0, 0)."
+                                )
+                            except Exception as e:
+                                if not self._check_disconnect(ch, e):
+                                    self._send_message("error", f"{ch.name.capitalize()} set home failed: {e}")
 
         except queue.Empty:
             pass
 
-
-
-    def _drain_controller(self) -> None: #reads messages from the controller, more focused on manual motion commnads
+    def _drain_controller(self) -> None:
         try:
             while True:
                 msg = self.q_from_controller.get_nowait()
-                
+
                 if not isinstance(msg, dict):
                     continue
-                
+
                 msg_type = msg.get("type")
-                
+
                 # Forward controller mapping info to the GUI
                 if msg_type == "controller_state":
                     self.q_to_gui.put({
@@ -492,106 +675,180 @@ class GantrySystem: # basically the manager
                         "mapping": msg.get("mapping", {})
                     })
                     continue
-                
+
                 if msg.get("type") != "input":
                     continue
-                
+
+                needle = self.channels["needle"]
                 cmd = str(msg.get("cmd", ""))
                 val = msg.get("value")
 
                 if cmd == "xy_motion" and isinstance(val, (tuple, list)) and len(val) == 2:
                     jx, jy = float(val[0]), float(val[1])
-                    self._dx += self.flip_x * (jx * self.steps.xy_step)
-                    self._dy += self.flip_y * (jy * self.steps.xy_step)
-                    
+                    needle.dx += needle.flip_x * (jx * self.steps.xy_step)
+                    needle.dy += needle.flip_y * (jy * self.steps.xy_step)
+
                 elif cmd == "z_motion" and isinstance(val, (tuple, list)) and len(val) == 2:
                     _jx, jy = float(val[0]), float(val[1])
-                    self._dz += self.flip_z * (jy * self.steps.z_step)
-                    
+                    needle.dz += needle.flip_z * (jy * self.steps.z_step)
+
                 elif cmd == "e_motion" and isinstance(val, (tuple, list)) and len(val) == 2:
                     lt, rt = float(val[0]), float(val[1])
-                    self._de += self.flip_e * ((rt - lt) * self.steps.e_step)
-                    
+                    needle.de += needle.flip_e * ((rt - lt) * self.steps.e_step)
+
                 elif cmd == "xy_step_size_inc":
                     self.steps.xy_step = min(self.steps.xy_step + 0.05, 5.0)
                     self.state.steps.xy_step = self.steps.xy_step
+                    for ch in self.channels.values():
+                        ch.state.steps.xy_step = self.steps.xy_step
                     self._send_message("info", f"XY step = {self.steps.xy_step:.3f} mm")
-                    
+
                 elif cmd == "xy_step_size_dec":
                     self.steps.xy_step = max(self.steps.xy_step - 0.05, 0.005)
                     self.state.steps.xy_step = self.steps.xy_step
+                    for ch in self.channels.values():
+                        ch.state.steps.xy_step = self.steps.xy_step
                     self._send_message("info", f"XY step = {self.steps.xy_step:.3f} mm")
-                    
+
                 elif cmd == "z_step_size_inc":
                     self.steps.z_step = min(self.steps.z_step + 0.01, 2.0)
                     self.state.steps.z_step = self.steps.z_step
+                    for ch in self.channels.values():
+                        ch.state.steps.z_step = self.steps.z_step
                     self._send_message("info", f"Z step = {self.steps.z_step:.3f} mm")
-                    
+
                 elif cmd == "z_step_size_dec":
                     self.steps.z_step = max(self.steps.z_step - 0.01, 0.001)
                     self.state.steps.z_step = self.steps.z_step
+                    for ch in self.channels.values():
+                        ch.state.steps.z_step = self.steps.z_step
                     self._send_message("info", f"Z step = {self.steps.z_step:.3f} mm")
-                    
+
                 elif cmd == "home_all":
                     try:
-                        self._flush_motion(self._board)
+                        self._flush_motion(needle)
                     except Exception:
                         pass
-                    
+
                     try:
-                        self._board.home()
-                        self.state.x = self.state.y = self.state.z = 0.0
+                        if needle.board is not None:
+                            needle.board.home()
+                        needle.state.x = needle.state.y = needle.state.z = 0.0
                         self._send_message("info", "Machine homed from controller.")
                     except Exception as e:
                         self._send_message("error", f"Controller home failed: {e}")
-                        
+
         except queue.Empty:
             pass
-        # --- Main thing: never directly sends motion to the board, changes _dx, _dy, _dz
-        # Means controller/manual motion is always going through the buffered-motion path
-        # drain_controller : accumulators change
-        # flush_motion : later sends one jog command
-        # manual motion is "smoothed" into periodic chunks rather than becoming one serial command per tiny input update
-
-# ---- DIFFERENCE: ----- 
-# drain_gui : handles what user asks for
-# drain_controller : handles ongoing motion input that needs to be accumulated
-
-
 
     # ------------------------------- motion ----------------------------------
-# completes the full loop
 
-# Takes stored motion, combines into one move, sends that move, then clears the stored amounts
-# Motion is not sent continuously 
-    def _flush_motion(self, board) -> None: # collects motion 
-        dx, dy, dz, de = self._dx, self._dy, self._dz, self._de # motion into local variables
-        self._dx = self._dy = self._dz = self._de = 0.0 # resets to 0
-        axes = {} # empty dictionary for move command (only includes axes that are actually moving)
-        if abs(dx) > 1e-9: axes["X"] = dx
-        if abs(dy) > 1e-9: axes["Y"] = dy
-        if abs(dz) > 1e-9: axes["Z"] = dz
-        if abs(de) > 1e-9: axes["E"] = de
-        if axes: # only sends if there is at least one axis to move
-            try: board.jog(axes, self.feed) # sends combined move to the board as one relative jog
-            except Exception as e: self._send_message("error", f"Jog failed: {e}")
+    def _flush_motion(self, ch: MotionChannel) -> None:
+        board = ch.board
+        if board is None:
+            ch.dx = ch.dy = ch.dz = ch.de = ch.da = 0.0
+            return
+
+        dx, dy, dz, de, da = ch.dx, ch.dy, ch.dz, ch.de, ch.da
+        ch.dx = ch.dy = ch.dz = ch.de = ch.da = 0.0
+
+        axes = {}
+        if abs(dx) > 1e-9:
+            axes["X"] = dx
+        if abs(dy) > 1e-9:
+            axes["Y"] = dy
+        if abs(dz) > 1e-9:
+            axes["Z"] = dz
+        if abs(de) > 1e-9:
+            axes["E"] = de
+        if abs(da) > 1e-9:
+            axes["A"] = da
+
+        if axes:
+            try:
+                board.jog(axes, self.feed)
+            except Exception as e:
+                if not self._check_disconnect(ch, e):
+                    self._send_message("error", f"{ch.name.capitalize()} jog failed: {e}")
 
     # ------------------------------- outbound --------------------------------
-    # Takes the current backend state and sends it to the GUI
-    # Frontend learns current position, step sizes, and feed
-    def _publish_state(self, board) -> None: # sends motion
-        self.state.x = getattr(board, "x", 0.0) # getattr avoids crashing if the attribute is missing
-        self.state.y = getattr(board, "y", 0.0)
-        self.state.z = getattr(board, "z", 0.0)
-        self.state.e = getattr(board, "e", 0.0)
+
+    def _publish_state(self) -> None:
+        needle = self.channels["needle"]
+        camera = self.channels["camera"]
+
+        if needle.board is not None:
+            needle.state.x = getattr(needle.board, "x", 0.0) * needle.flip_x
+            needle.state.y = getattr(needle.board, "y", 0.0) * needle.flip_y
+            needle.state.z = getattr(needle.board, "z", 0.0) * needle.flip_z
+            needle.state.e = getattr(needle.board, "e", 0.0) * needle.flip_e
+            needle.state.a = getattr(needle.board, "a", 0.0) * needle.flip_a
+
+        if camera.board is not None:
+            camera.state.x = getattr(camera.board, "x", 0.0) * camera.flip_x
+            camera.state.y = getattr(camera.board, "y", 0.0) * camera.flip_y
+            camera.state.z = getattr(camera.board, "z", 0.0) * camera.flip_z
+            camera.state.e = getattr(camera.board, "e", 0.0) * camera.flip_e
+            camera.state.a = getattr(camera.board, "a", 0.0) * camera.flip_a
+
+        # Keep old top-level values for compatibility
+        self.state.x = needle.state.x
+        self.state.y = needle.state.y
+        self.state.z = needle.state.z
+        self.state.e = needle.state.e
+        self.state.a = needle.state.a
+
         self.q_to_gui.put({
             "type": "state",
-            "x": self.state.x, "y": self.state.y, "z": self.state.z, "e": self.state.e,
-            "xy_step": self.steps.xy_step, "z_step": self.steps.z_step, "e_step": self.steps.e_step,
-            "feed": self.feed,
-        }) # basically a "state packet"
-        # does not currently have pump (Fix)
-        # this is where the GUI gets the position
 
-    def _send_message(self, level: str, text: str): # state/messages sent back to the GUI
+            # old fields
+            "x": self.state.x,
+            "y": self.state.y,
+            "z": self.state.z,
+            "e": self.state.e,
+
+            # new needle fields
+            "needle_x": needle.state.x,
+            "needle_y": needle.state.y,
+            "needle_z": needle.state.z,
+            "needle_e": needle.state.e,
+            "needle_a": needle.state.a,
+
+            # new camera fields
+            "camera_x": camera.state.x,
+            "camera_y": camera.state.y,
+            "camera_z": camera.state.z,
+            "camera_e": camera.state.e,
+            "camera_a": camera.state.a,
+
+            "xy_step": self.steps.xy_step,
+            "z_step": self.steps.z_step,
+            "a_step": self.steps.a_step,
+            "e_step": self.steps.e_step,
+            "feed": self.feed,
+        })
+
+    def _mark_disconnected(self, ch: MotionChannel, e: Exception) -> None:
+        """Mark a channel as disconnected and notify the GUI."""
+        ch.connected = False
+        ch.board = None
+        ch.dx = ch.dy = ch.dz = ch.de = ch.da = 0.0
+        self.q_to_gui.put({
+            "type": "disconnected",
+            "channel": ch.name,
+            "port": ch.port or "unknown",
+            "reason": str(e),
+        })
+
+    def _check_disconnect(self, ch: MotionChannel, e: Exception) -> bool:
+        """Return True and call _mark_disconnected if e looks like a hardware disconnection."""
+        msg = str(e).lower()
+        if any(k in msg for k in ("writefile", "permissionerror", "device not recognized",
+                                   "access is denied", "clearcommerror", "serialexception",
+                                   "port is closed", "device disconnected")):
+            self._mark_disconnected(ch, e)
+            return True
+        return False
+
+    def _send_message(self, level: str, text: str):
         self.q_to_gui.put({"type": "message", "level": level, "text": text})

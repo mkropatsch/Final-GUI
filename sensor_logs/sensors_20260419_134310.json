@@ -1,0 +1,649 @@
+{
+  "session_start": "2026-04-19 13:43:10",
+  "readings": [
+    {
+      "timestamp": "2026-04-19 13:43:12",
+      "elapsed_s": 62.7,
+      "co2": 579.8521574175634,
+      "temp": 21.749638796845414,
+      "rh": 38.41783495292226,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:12",
+      "elapsed_s": 62.7,
+      "co2": 578.8228146369521,
+      "temp": 21.69807291936161,
+      "rh": 38.778306889483076,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:13",
+      "elapsed_s": 63.0,
+      "co2": 587.8877337696829,
+      "temp": 21.71212440677448,
+      "rh": 38.341662232691206,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:14",
+      "elapsed_s": 64.0,
+      "co2": 593.864465805315,
+      "temp": 21.68914178272087,
+      "rh": 38.63156339276125,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:15",
+      "elapsed_s": 65.0,
+      "co2": 585.4856485594327,
+      "temp": 21.681267105797403,
+      "rh": 38.7833954113542,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:16",
+      "elapsed_s": 66.0,
+      "co2": 573.3375493472977,
+      "temp": 21.662972583613243,
+      "rh": 38.4501649965084,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:17",
+      "elapsed_s": 67.0,
+      "co2": 580.1779646301044,
+      "temp": 21.637915306449237,
+      "rh": 38.85862931712869,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:18",
+      "elapsed_s": 68.0,
+      "co2": 588.1114193540274,
+      "temp": 21.61553155456058,
+      "rh": 38.6483086455675,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:19",
+      "elapsed_s": 69.0,
+      "co2": 586.7090827262795,
+      "temp": 21.599781450185993,
+      "rh": 38.9081682666868,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:20",
+      "elapsed_s": 70.0,
+      "co2": 581.2198965461138,
+      "temp": 21.603398514488344,
+      "rh": 38.921600798117055,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:21",
+      "elapsed_s": 71.0,
+      "co2": 572.0386195320416,
+      "temp": 21.591552705760733,
+      "rh": 38.53682559802801,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:22",
+      "elapsed_s": 72.0,
+      "co2": 577.775622061623,
+      "temp": 21.575970437715583,
+      "rh": 39.28396118024027,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:23",
+      "elapsed_s": 73.0,
+      "co2": 586.433624607891,
+      "temp": 21.5616804942759,
+      "rh": 38.8394771659237,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:24",
+      "elapsed_s": 74.0,
+      "co2": 591.5611784011603,
+      "temp": 21.55635034707784,
+      "rh": 38.70610493375854,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:25",
+      "elapsed_s": 75.0,
+      "co2": 585.1900518282089,
+      "temp": 21.496711937416087,
+      "rh": 38.71921858977276,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:26",
+      "elapsed_s": 76.0,
+      "co2": 578.7610092207755,
+      "temp": 21.51227963375046,
+      "rh": 39.12660241442886,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:27",
+      "elapsed_s": 77.0,
+      "co2": 581.7154734794574,
+      "temp": 21.519661770072997,
+      "rh": 38.62145216661515,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:28",
+      "elapsed_s": 78.0,
+      "co2": 594.0739387523097,
+      "temp": 21.450424568127893,
+      "rh": 38.7425242012352,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:29",
+      "elapsed_s": 79.0,
+      "co2": 589.2442652091227,
+      "temp": 21.451932077421507,
+      "rh": 38.729009734022945,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:30",
+      "elapsed_s": 80.0,
+      "co2": 588.7120199137626,
+      "temp": 21.434995996966343,
+      "rh": 38.66664321757465,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:31",
+      "elapsed_s": 81.0,
+      "co2": 591.5856743602928,
+      "temp": 21.416737785077952,
+      "rh": 38.46626821980257,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:32",
+      "elapsed_s": 82.0,
+      "co2": 596.4479892971914,
+      "temp": 21.461360191190842,
+      "rh": 38.51368643599682,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:33",
+      "elapsed_s": 83.0,
+      "co2": 605.061065743904,
+      "temp": 21.413301002552988,
+      "rh": 38.78583010440244,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:34",
+      "elapsed_s": 84.0,
+      "co2": 607.847857558367,
+      "temp": 21.445914857051434,
+      "rh": 38.697179730299645,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:35",
+      "elapsed_s": 85.0,
+      "co2": 600.5802897166302,
+      "temp": 21.395656750110533,
+      "rh": 38.74122884787627,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:36",
+      "elapsed_s": 86.0,
+      "co2": 604.3080956217931,
+      "temp": 21.34580383463089,
+      "rh": 38.5967986658579,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:37",
+      "elapsed_s": 87.0,
+      "co2": 609.7150281325954,
+      "temp": 21.354161705162337,
+      "rh": 38.648863579404065,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:38",
+      "elapsed_s": 88.0,
+      "co2": 616.6654237387306,
+      "temp": 21.417363048638855,
+      "rh": 38.98786140358242,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:39",
+      "elapsed_s": 89.0,
+      "co2": 617.9368743735018,
+      "temp": 21.39922356943916,
+      "rh": 38.67255989098389,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:40",
+      "elapsed_s": 90.0,
+      "co2": 613.7411643053099,
+      "temp": 21.31267362401432,
+      "rh": 39.229071783916865,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:41",
+      "elapsed_s": 91.0,
+      "co2": 616.5857596739429,
+      "temp": 21.421130473595632,
+      "rh": 39.08719877390553,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:42",
+      "elapsed_s": 92.0,
+      "co2": 632.6366614742897,
+      "temp": 21.33197680104084,
+      "rh": 38.76118972344316,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:43",
+      "elapsed_s": 93.0,
+      "co2": 631.2796221014529,
+      "temp": 21.367293962505144,
+      "rh": 38.72547125927224,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:44",
+      "elapsed_s": 93.9,
+      "co2": 623.1809268258712,
+      "temp": 21.37790584352784,
+      "rh": 38.78430512914577,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:45",
+      "elapsed_s": 94.9,
+      "co2": 622.4835466826758,
+      "temp": 21.387847301169046,
+      "rh": 38.78824554515679,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:46",
+      "elapsed_s": 96.0,
+      "co2": 632.9261200534473,
+      "temp": 21.34609399581411,
+      "rh": 39.04859770149392,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:47",
+      "elapsed_s": 97.0,
+      "co2": 635.8222178605394,
+      "temp": 21.36753515710674,
+      "rh": 38.78192754257675,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:48",
+      "elapsed_s": 98.0,
+      "co2": 638.8979606433336,
+      "temp": 21.426577839077314,
+      "rh": 39.021671860051335,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:49",
+      "elapsed_s": 99.0,
+      "co2": 630.3589981240488,
+      "temp": 21.3206912281946,
+      "rh": 38.73718147509292,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:50",
+      "elapsed_s": 100.0,
+      "co2": 624.5102461275923,
+      "temp": 21.33029020680048,
+      "rh": 38.744963545747666,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:51",
+      "elapsed_s": 101.0,
+      "co2": 639.3819541816292,
+      "temp": 21.365404234237857,
+      "rh": 38.99434799609,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:52",
+      "elapsed_s": 102.0,
+      "co2": 650.5783492342555,
+      "temp": 21.370374125557223,
+      "rh": 38.82003117253726,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:53",
+      "elapsed_s": 103.0,
+      "co2": 645.8370962390218,
+      "temp": 21.388347798949997,
+      "rh": 38.90934883082535,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:54",
+      "elapsed_s": 104.0,
+      "co2": 627.5970201659476,
+      "temp": 21.38643226717428,
+      "rh": 39.14205154734759,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:55",
+      "elapsed_s": 105.0,
+      "co2": 632.4621218979646,
+      "temp": 21.434037655940767,
+      "rh": 38.58028129698964,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    },
+    {
+      "timestamp": "2026-04-19 13:43:56",
+      "elapsed_s": 106.0,
+      "co2": 645.2585989868851,
+      "temp": 21.458992499606783,
+      "rh": 38.46970839581801,
+      "setpoint": 37.0,
+      "heater_pwm": null,
+      "alerts": [
+        "temp_out_of_range",
+        "co2_low",
+        "rh_low"
+      ]
+    }
+  ]
+}

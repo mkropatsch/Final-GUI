@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import queue # communication between worker thread and GUI
 import random # for simulation mode
@@ -16,9 +17,11 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -105,10 +108,12 @@ class SimReader(threading.Thread):
         self._stop_event = threading.Event()
         self.rate = max(0.1, float(rate_hz))
         self.t0 = time.time()
-        self.base_co2 = 650 + random.uniform(-40, 40)
-        self.base_temp = 22.5 + random.uniform(-1, 1)
-        self.base_rh = 42 + random.uniform(-5, 5)
-        self.base_o2 = 20.7 + random.uniform(-0.2, 0.2)
+        self.setpoint = 37.0
+        # Incubator starting conditions: warming up from slightly below setpoint
+        self._sim_temp = 36.2 + random.uniform(-0.1, 0.1)
+        self.base_co2 = 50000 + random.uniform(-500, 500)   # 5% CO2 target
+        self.base_rh = 95.0 + random.uniform(-1, 1)         # >90% RH target
+        self.base_o2 = 20.9 + random.uniform(-0.05, 0.05)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -118,13 +123,33 @@ class SimReader(threading.Thread):
         dt = 1.0 / self.rate
         while not self._stop_event.is_set():
             t = time.time() - self.t0
-            co2 = self.base_co2 + 30 * math.sin(2 * math.pi * 0.015 * t) + 8 * math.sin(2 * math.pi * 0.21 * t) + random.gauss(0, 3)
-            co2 = max(380, co2)
-            temp = self.base_temp + 0.25 * math.sin(2 * math.pi * 0.01 * t) + random.gauss(0, 0.03)
-            rh = self.base_rh - 0.35 * (temp - self.base_temp) + random.gauss(0, 0.2)
-            rh = max(15, min(85, rh))
-            o2 = self.base_o2 + 0.02 * math.sin(2 * math.pi * 0.02 * t) + random.gauss(0, 0.01)
-            self.q.put(("data", {"co2": float(co2), "temp": float(temp), "rh": float(rh), "o2": float(o2)}))
+
+            # Simulate PID heater: proportional response drives temp toward setpoint
+            error = self.setpoint - self._sim_temp
+            heater_pwm = max(0, min(255, int(error * 120)))
+            # Temp drifts toward setpoint with small noise
+            self._sim_temp += error * 0.04 + random.gauss(0, 0.015)
+            temp = self._sim_temp
+
+            # CO2 oscillates gently around 5% target (50,000 ppm)
+            co2 = self.base_co2 + 200 * math.sin(2 * math.pi * 0.008 * t) + random.gauss(0, 80)
+            co2 = max(45000, min(55000, co2))
+
+            # RH stable above 90%, slight inverse correlation with temp deviation
+            rh = self.base_rh - 0.4 * (temp - self.setpoint) + random.gauss(0, 0.15)
+            rh = max(88, min(99, rh))
+
+            o2 = self.base_o2 + random.gauss(0, 0.01)
+
+            self.q.put(("data", {
+                "co2":        float(co2),
+                "temp":       float(temp),
+                "rh":         float(rh),
+                "o2":         float(o2),
+                "setpoint":   float(self.setpoint),
+                "heater_pwm": heater_pwm,
+                "safety_hold": temp >= 37.4,
+            }))
             time.sleep(dt)
         self.q.put(("status", "Simulation stopped"))
 
@@ -133,6 +158,71 @@ def list_ports() -> list[str]:
     if not HAS_SERIAL:
         return []
     return [p.device for p in serial.tools.list_ports.comports()]
+
+
+class SerialMonitorWindow(QWidget):
+    """Floating serial monitor popup — shows raw Arduino output and lets you send commands."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Window)
+        self.setWindowTitle("Serial Monitor")
+        self.resize(620, 420)
+        self._reader = None
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        self._output = QTextEdit()
+        self._output.setReadOnly(True)
+        self._output.setStyleSheet(
+            "background-color: #0d1b2a; color: #c8d8e8; font-family: Consolas, monospace; font-size: 12px;"
+        )
+        layout.addWidget(self._output, 1)
+
+        send_row = QHBoxLayout()
+        self._input = QLineEdit()
+        self._input.setPlaceholderText("Type command and press Enter or Send…")
+        self._input.returnPressed.connect(self._send)
+        self._btn_send = QPushButton("Send")
+        self._btn_send.clicked.connect(self._send)
+        self._btn_clear = QPushButton("Clear")
+        self._btn_clear.clicked.connect(self._output.clear)
+        send_row.addWidget(self._input, 1)
+        send_row.addWidget(self._btn_send)
+        send_row.addWidget(self._btn_clear)
+        layout.addLayout(send_row)
+
+        self.setStyleSheet(
+            """
+            QWidget { background-color: #0f1e2e; color: #d8e2ee; }
+            QPushButton {
+                background-color: #4b617b; color: white; border: none;
+                border-radius: 4px; padding: 6px 12px;
+            }
+            QPushButton:hover { background-color: #5d7694; }
+            QLineEdit {
+                background-color: #102030; color: #d8e2ee;
+                border: 1px solid #48607d; border-radius: 4px; padding: 4px 8px;
+            }
+            """
+        )
+
+    def set_reader(self, reader) -> None:
+        self._reader = reader
+
+    def append_line(self, line: str) -> None:
+        self._output.append(line)
+        sb = self._output.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def _send(self) -> None:
+        text = self._input.text().strip()
+        if not text:
+            return
+        self._input.clear()
+        self.append_line(f"> {text}")
+        if self._reader is not None and hasattr(self._reader, "send_command"):
+            self._reader.send_command(text)
 
 
 class SensorCard(QFrame):
@@ -170,24 +260,77 @@ class SensorCard(QFrame):
     def set_value(self, text: str) -> None:
         self.value_label.setText(text)
 
+    def set_alert(self, level: str) -> None:
+        """level: 'normal', 'warn', 'critical'"""
+        colors = {
+            "normal":   self.accent,
+            "warn":     "#ffcb6b",
+            "critical": "#ff5555",
+        }
+        color = colors.get(level, self.accent)
+        self.setStyleSheet(
+            f"""
+            QFrame#SensorCard {{
+                background-color: #182433;
+                border: 1px solid #31465f;
+                border-left: 5px solid {color};
+                border-radius: 10px;
+            }}
+            QLabel {{ border: none; }}
+            """
+        )
+        self.value_label.setStyleSheet(f"color: {color}; font-size: 24px; font-weight: 700;")
+
 
 class SensorsTab(QWidget):
+    incubator_connected = pyqtSignal(object) # emits the IncubatorSerial instance
+    
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
 
-        self.reader: SerialReader | SimReader | None = None
+        self.reader: IncubatorSerial | SimReader | None = None
         self.q: queue.Queue = queue.Queue()
+        self._last_setpoint: float = 37.0
+        
         self.t0 = time.time()
-        self.is_recording = True
+        self.is_recording = False
 
         self.T_GOOD = 800
         self.T_WARN = 1500
+
+        # Thresholds for alerts
+        self.THRESH_TEMP_LOW          = 36.5   # °C — lower bound of safe range
+        self.THRESH_TEMP_HIGH         = 37.5   # °C — upper bound of safe range
+        self.THRESH_TEMP_CRITICAL     = 40.0   # °C — absolute critical (popup)
+        self.THRESH_TEMP_TREND_N      = 6      # readings needed for trend check
+        self.THRESH_TEMP_TREND_RISE   = 0.15   # °C rise across trend window to flag
+
+        # CO₂ — incubator target: 5% = 50,000 ppm (spec: 5% ± 0.2%)
+        self.THRESH_CO2_LOW           = 48000  # ppm (4.8 %)
+        self.THRESH_CO2_HIGH          = 52000  # ppm (5.2 %)
+
+        # Humidity — incubator target: >90 % RH
+        self.THRESH_RH_MIN            = 90.0   # % — warn if below this
+
+        # Rolling temperature history for trend detection (independent of recording)
+        self._temp_history: deque = deque(maxlen=12)
+
+        # JSON logging
+        self._log_dir = os.path.join(os.getcwd(), "sensor_logs")
+        self._log_path: str | None = None
+        self._log_buffer: list = []
+        self._log_flush_every = 10       # flush to disk every N readings
+        self._log_flush_count = 0
+        self._session_start: str | None = None
+        self._alert_active: dict = {}    # tracks active alerts to avoid repeated pop-ups
 
         self.ts = deque(maxlen=600)
         self.co2_series = deque(maxlen=600)
         self.temp_series = deque(maxlen=600)
         self.rh_series = deque(maxlen=600)
         self.o2_series = deque(maxlen=600)
+
+        self._serial_monitor = SerialMonitorWindow()
 
         self._build_ui()
         self.refresh_ports()
@@ -210,9 +353,9 @@ class SensorsTab(QWidget):
 
         self.btn_refresh = QPushButton("Refresh")
         self.btn_connect = QPushButton("Connect")
-        self.btn_record = QPushButton("Stop Recording")
+        self.btn_record = QPushButton("Start Recording")
         self.btn_clear = QPushButton("Clear Graphs")
-
+        self.btn_serial_monitor = QPushButton("Serial Monitor")
         self.conn_status = QLabel("Not connected")
         self.conn_status.setMinimumWidth(240)
         self.conn_status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -223,6 +366,7 @@ class SensorsTab(QWidget):
         conn_layout.addWidget(self.btn_connect)
         conn_layout.addWidget(self.btn_record)
         conn_layout.addWidget(self.btn_clear)
+        conn_layout.addWidget(self.btn_serial_monitor)
         conn_layout.addSpacing(12)
         conn_layout.addWidget(self.conn_status)
         conn_layout.addStretch()
@@ -249,6 +393,63 @@ class SensorsTab(QWidget):
 
         root.addWidget(cards_box)
 
+        heater_box = QGroupBox("Heater Control")
+        heater_layout = QHBoxLayout(heater_box)
+        self.setpoint_input = QLineEdit("37.0")
+        self.setpoint_input.setMaximumWidth(80)
+        self.btn_apply_setpoint = QPushButton("Apply")
+        self.btn_apply_setpoint.clicked.connect(self._on_apply_setpoint)
+        self.lab_heater_pwm = QLabel("Heater PWM: —")
+        self.lab_safety_hold = QLabel("● Safety Hold: —")
+        self.lab_safety_hold.setStyleSheet("color: #555e6b; font-size: 13px; font-weight: 600;")
+        heater_layout.addWidget(QLabel("Setpoint (°C)"))
+        heater_layout.addWidget(self.setpoint_input)
+        heater_layout.addWidget(self.btn_apply_setpoint)
+        heater_layout.addSpacing(20)
+        heater_layout.addWidget(self.lab_heater_pwm)
+        heater_layout.addSpacing(20)
+        heater_layout.addWidget(self.lab_safety_hold)
+        heater_layout.addStretch()
+        root.addWidget(heater_box)
+
+        # Target ranges panel
+        ranges_box = QGroupBox("Target Ranges")
+        ranges_layout = QGridLayout(ranges_box)
+        ranges_layout.setContentsMargins(16, 12, 16, 12)
+        ranges_layout.setHorizontalSpacing(32)
+        ranges_layout.setVerticalSpacing(10)
+
+        hdr_style = "color: #8a9bb0; font-size: 13px; font-weight: 600;"
+        for col, hdr in enumerate(["Parameter", "Target", "Current", "Status"]):
+            lbl = QLabel(hdr)
+            lbl.setStyleSheet(hdr_style)
+            ranges_layout.addWidget(lbl, 0, col)
+
+        def _make_row(row, name):
+            name_lbl    = QLabel(name)
+            target_lbl  = QLabel("—")
+            current_lbl = QLabel("—")
+            status_lbl  = QLabel("●")
+            name_lbl.setStyleSheet("color: #d8e2ee; font-size: 15px; font-weight: 600;")
+            for lbl in (target_lbl, current_lbl):
+                lbl.setStyleSheet("color: #d8e2ee; font-size: 15px;")
+            status_lbl.setStyleSheet("color: #555e6b; font-size: 22px;")
+            ranges_layout.addWidget(name_lbl,    row, 0)
+            ranges_layout.addWidget(target_lbl,  row, 1)
+            ranges_layout.addWidget(current_lbl, row, 2)
+            ranges_layout.addWidget(status_lbl,  row, 3)
+            return target_lbl, current_lbl, status_lbl
+
+        self._rng_temp_target,   self._rng_temp_current,   self._rng_temp_status   = _make_row(1, "Temperature")
+        self._rng_co2_target,    self._rng_co2_current,    self._rng_co2_status    = _make_row(2, "CO₂")
+        self._rng_rh_target,     self._rng_rh_current,     self._rng_rh_status     = _make_row(3, "Humidity")
+
+        self._rng_temp_target.setText("36.5 – 37.5 °C")
+        self._rng_co2_target.setText("4.8 – 5.2 %  (48k – 52k ppm)")
+        self._rng_rh_target.setText("> 90 % RH")
+
+        root.addWidget(ranges_box)
+
         self.air_status = QLabel("Status: —")
         self.air_status.setStyleSheet("font-size: 16px; font-weight: 700; color: #d8e2ee; padding: 2px 4px;")
         root.addWidget(self.air_status)
@@ -270,7 +471,7 @@ class SensorsTab(QWidget):
         plots_layout = QVBoxLayout(plots_box)
 
         if HAS_MPL:
-            self.fig = Figure(figsize=(8.5, 5.2), dpi=100, facecolor="#122033")
+            self.fig = Figure(figsize=(8.5, 3.8), dpi=100, facecolor="#122033")
             self.ax_co2 = self.fig.add_subplot(221)
             self.ax_temp = self.fig.add_subplot(222)
             self.ax_rh = self.fig.add_subplot(223)
@@ -303,6 +504,7 @@ class SensorsTab(QWidget):
         self.btn_connect.clicked.connect(self.toggle_connect)
         self.btn_record.clicked.connect(self.toggle_recording)
         self.btn_clear.clicked.connect(self._clear_graphs)
+        self.btn_serial_monitor.clicked.connect(self._open_serial_monitor)
 
         self.setStyleSheet(
             """
@@ -387,28 +589,195 @@ class SensorsTab(QWidget):
             if not HAS_SERIAL:
                 QMessageBox.critical(self, "pyserial missing", "Install pyserial or choose simulation mode.")
                 return
-            self.reader = SerialReader(port=port, baud=115200, out_queue=self.q)
+            self.reader = IncubatorSerial(port=port, out_queue=self.q)
 
         self.reader.start()
+        if isinstance(self.reader, IncubatorSerial):
+            self.reader.set_setpoint(self._last_setpoint)
+        self._serial_monitor.set_reader(self.reader)
+        self.incubator_connected.emit(self.reader)
         self.btn_connect.setText("Disconnect")
         self.conn_status.setText(f"Connecting to {port}…")
 
 
     def toggle_recording(self) -> None:
-        # warning if nothing is connected:
         if self.reader is None:
             QMessageBox.warning(self, "Not Connected", "Please connect first.")
             return
-        
+
         self.is_recording = not self.is_recording
-        
+
         if self.is_recording:
             self.btn_record.setText("Stop Recording")
-            self.conn_status.setText("Recording resumed.")
+            self._start_log()
+            self.conn_status.setText("Recording started.")
         else:
             self.btn_record.setText("Start Recording")
-            self.conn_status.setText("Recording paused.")
+            self._flush_log(final=True)
+            self.conn_status.setText(f"Recording saved: {os.path.basename(self._log_path or '')}")
 
+
+    def _start_log(self) -> None:
+        os.makedirs(self._log_dir, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._log_path = os.path.join(self._log_dir, f"sensors_{stamp}.json")
+        self._session_start = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._log_buffer = []
+        self._log_flush_count = 0
+        self._alert_active = {}
+        try:
+            with open(self._log_path, "w", encoding="utf-8") as f:
+                json.dump({"session_start": self._session_start, "readings": []}, f, indent=2)
+        except Exception as e:
+            self.conn_status.setText(f"Log create error: {e}")
+
+    def _is_temp_rising(self) -> bool:
+        """Return True if the temperature history shows a sustained upward trend."""
+        n = self.THRESH_TEMP_TREND_N
+        if len(self._temp_history) < n:
+            return False
+        recent = list(self._temp_history)[-n:]
+        half = n // 2
+        avg_early = sum(recent[:half]) / half
+        avg_late  = sum(recent[half:]) / (n - half)
+        return (avg_late - avg_early) >= self.THRESH_TEMP_TREND_RISE
+
+    def _check_thresholds(self, d: dict) -> list[str]:
+        alerts = []
+        temp = d.get("temp")
+        co2 = d.get("co2")
+        rh = d.get("rh")
+        pwm = d.get("heater_pwm")
+
+        if temp is not None:
+            if temp >= self.THRESH_TEMP_CRITICAL:
+                alerts.append("temp_critical")
+            elif temp > self.THRESH_TEMP_HIGH or temp < self.THRESH_TEMP_LOW:
+                alerts.append("temp_out_of_range")
+                if self._is_temp_rising():
+                    alerts.append("temp_rising_trend")
+        if co2 is not None:
+            if co2 > self.THRESH_CO2_HIGH:
+                alerts.append("co2_high")
+            elif co2 < self.THRESH_CO2_LOW:
+                alerts.append("co2_low")
+        if rh is not None:
+            # Incubator spec: RH must be >90 %; warn when it drops below
+            if rh < self.THRESH_RH_MIN:
+                alerts.append("rh_low")
+        if pwm is not None and pwm >= 255:
+            alerts.append("heater_saturated")
+
+        return alerts
+
+    def _apply_alerts(self, alerts: list[str], d: dict) -> None:
+        """Update card colours and fire pop-ups for new alerts."""
+        temp = d.get("temp", "?")
+        temp_str = f"{temp:.2f}°C" if isinstance(temp, float) else str(temp)
+
+        # Temp card — critical (red) only at ≥40°C; yellow for out-of-range blips
+        if "temp_critical" in alerts:
+            self.card_temp.set_alert("critical")
+        elif "temp_out_of_range" in alerts:
+            self.card_temp.set_alert("warn")
+        else:
+            self.card_temp.set_alert("normal")
+
+        # CO₂ card — both out-of-range directions are warn (spec: 4.8–5.2 %)
+        if "co2_high" in alerts or "co2_low" in alerts:
+            self.card_co2.set_alert("warn")
+        else:
+            self.card_co2.set_alert("normal")
+
+        # RH card — spec: >90 %; warn when below
+        if "rh_low" in alerts:
+            self.card_rh.set_alert("warn")
+        else:
+            self.card_rh.set_alert("normal")
+
+        # Pop-ups — only for events worth interrupting the user
+        # temp_out_of_range: card change only, no popup (could be a blip)
+        # temp_rising_trend: one popup warning that temp is climbing
+        # temp_critical:     one popup that temp has reached dangerous level
+        popup_alerts = {
+            "temp_critical":      (QMessageBox.critical,
+                                   f"Temperature critical: {temp_str}\n"
+                                   f"Safe range is {self.THRESH_TEMP_LOW}–{self.THRESH_TEMP_HIGH}°C. "
+                                   f"Reached {self.THRESH_TEMP_CRITICAL}°C threshold."),
+            "temp_rising_trend":  (QMessageBox.warning,
+                                   f"Temperature trending upward: {temp_str}\n"
+                                   f"Readings have been consistently rising outside the desired range "
+                                   f"({self.THRESH_TEMP_LOW}–{self.THRESH_TEMP_HIGH}°C)."),
+            "co2_high":           (QMessageBox.warning,
+                                   f"CO₂ too high: {d.get('co2', 0):.0f} ppm "
+                                   f"({d.get('co2', 0)/10000:.2f}%)\n"
+                                   f"Target range: {self.THRESH_CO2_LOW//1000}–"
+                                   f"{self.THRESH_CO2_HIGH//1000}k ppm (4.8–5.2%)"),
+            "co2_low":            (QMessageBox.warning,
+                                   f"CO₂ too low: {d.get('co2', 0):.0f} ppm "
+                                   f"({d.get('co2', 0)/10000:.2f}%)\n"
+                                   f"Target range: {self.THRESH_CO2_LOW//1000}–"
+                                   f"{self.THRESH_CO2_HIGH//1000}k ppm (4.8–5.2%)"),
+            "rh_low":             (QMessageBox.warning,
+                                   f"Humidity too low: {d.get('rh', '?'):.1f}%\n"
+                                   f"Incubator requires >90% RH."),
+            "heater_saturated":   (QMessageBox.warning,
+                                   "Heater PWM at maximum — may not reach setpoint."),
+        }
+        for alert in alerts:
+            if alert not in popup_alerts:
+                continue   # temp_out_of_range: visual only, no popup
+            if not self._alert_active.get(alert):
+                self._alert_active[alert] = True
+                fn, msg = popup_alerts[alert]
+                fn(self, "Sensor Alert", msg)
+
+        # Clear resolved alerts
+        for alert in list(self._alert_active):
+            if alert not in alerts:
+                self._alert_active[alert] = False
+
+    def _append_reading(self, d: dict, alerts: list[str]) -> None:
+        reading = {
+            "timestamp":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "elapsed_s":  round(time.time() - self.t0, 1),
+            "co2":        d.get("co2"),
+            "temp":       d.get("temp"),
+            "rh":         d.get("rh"),
+            "setpoint":   d.get("setpoint", self._last_setpoint),
+            "heater_pwm": d.get("heater_pwm"),
+            "alerts":     alerts,
+        }
+        self._log_buffer.append(reading)
+        self._flush_log()
+
+    def _flush_log(self, final: bool = False) -> None:
+        if not self._log_path or not self._log_buffer:
+            return
+        try:
+            # Read existing file if it exists, otherwise start fresh
+            if os.path.exists(self._log_path):
+                with open(self._log_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            else:
+                data = {"session_start": self._session_start, "readings": []}
+
+            data["readings"].extend(self._log_buffer)
+            if final:
+                data["session_end"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            with open(self._log_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+
+            self._log_buffer = []
+            self._log_flush_count = 0
+        except Exception as e:
+            self.conn_status.setText(f"Log write error: {e}")
+
+    def _open_serial_monitor(self) -> None:
+        self._serial_monitor.set_reader(self.reader)
+        self._serial_monitor.show()
+        self._serial_monitor.raise_()
 
     def _pump_queue(self) -> None:
         try:
@@ -416,10 +785,11 @@ class SensorsTab(QWidget):
                 kind, payload = self.q.get_nowait()
                 if kind == "status":
                     self.conn_status.setText(str(payload))
+                    self._serial_monitor.append_line(f"[status] {payload}")
                     if str(payload).lower() in {"disconnected", "simulation stopped"}:
                         self.btn_connect.setText("Connect")
                 elif kind == "raw":
-                    pass
+                    self._serial_monitor.append_line(str(payload))
                 elif kind == "data":
                     self._update_readings(payload)
         except queue.Empty:
@@ -437,11 +807,23 @@ class SensorsTab(QWidget):
             self.card_co2.set_value(f"{co2:.0f}")
         if temp is not None:
             self.card_temp.set_value(f"{temp:.2f}")
+            self._temp_history.append(temp)   # always track for trend detection
         if rh is not None:
             self.card_rh.set_value(f"{rh:.1f}")
         if o2 is not None:
             self.card_o2.set_value(f"{o2:.2f}")
-
+        if d.get("heater_pwm") is not None:
+            self.lab_heater_pwm.setText(f"Heater PWM: {d['heater_pwm']}/255")
+        if d.get("safety_hold") is not None:
+            on = d["safety_hold"]
+            self.lab_safety_hold.setText("● Safety Hold: ON" if on else "● Safety Hold: OFF")
+            self.lab_safety_hold.setStyleSheet(
+                "color: #ff5555; font-size: 13px; font-weight: 600;" if on
+                else "color: #88e06b; font-size: 13px; font-weight: 600;"
+            )
+        if d.get("setpoint") is not None:
+            self._last_setpoint = d["setpoint"]
+            
         if HAS_MPL and self.is_recording and co2 is not None:
             t = time.time() - self.t0
             self.ts.append(t)
@@ -481,6 +863,22 @@ class SensorsTab(QWidget):
         if co2 is not None:
             self._apply_air_status(float(co2))
 
+        alerts = self._check_thresholds(d)
+        self._apply_alerts(alerts, d)
+        self._update_ranges_display(d, alerts)
+        if self.is_recording and self._log_path:
+            self._append_reading(d, alerts)
+    
+    def _on_apply_setpoint(self) -> None:
+        try:
+            val = float(self.setpoint_input.text())
+        except ValueError:
+            return
+        self._last_setpoint = val
+        if isinstance(self.reader, IncubatorSerial):
+            self.reader.set_setpoint(val)
+
+
     def _autoscale(self, ax, x, y, pad_frac: float = 0.08, pad_abs: float = 0.02) -> None:
         if len(x) < 2 or len(y) < 2:
             return
@@ -493,18 +891,20 @@ class SensorsTab(QWidget):
         ax.set_ylim(ymin - pad, ymax + pad)
 
     def _apply_air_status(self, co2: float) -> None:
-        if co2 < self.T_GOOD:
-            self.air_status.setText("Status: Fresh air")
+        """Show incubator CO₂ status (target 5% = 50,000 ppm, ±0.2%)."""
+        pct = co2 / 10000.0
+        if self.THRESH_CO2_LOW <= co2 <= self.THRESH_CO2_HIGH:
+            self.air_status.setText(f"CO₂ Status: In range ({pct:.2f}%)")
             self.air_status.setStyleSheet("font-size: 16px; font-weight: 700; color: #88e06b; padding: 2px 4px;")
-            self.tip_label.setText("Air looks good right now.")
-        elif co2 < self.T_WARN:
-            self.air_status.setText("Status: Getting stuffy")
+            self.tip_label.setText("CO₂ is within the 4.8–5.2% target range.")
+        elif co2 < self.THRESH_CO2_LOW:
+            self.air_status.setText(f"CO₂ Status: Low ({pct:.2f}%)")
             self.air_status.setStyleSheet("font-size: 16px; font-weight: 700; color: #ffcb6b; padding: 2px 4px;")
-            self.tip_label.setText("Consider opening a window or increasing ventilation.")
+            self.tip_label.setText("CO₂ below 4.8% — check supply and flow rate.")
         else:
-            self.air_status.setText("Status: High CO₂ — ventilate")
-            self.air_status.setStyleSheet("font-size: 16px; font-weight: 700; color: #ff7b72; padding: 2px 4px;")
-            self.tip_label.setText("Open doors/windows or increase airflow to bring CO₂ down.")
+            self.air_status.setText(f"CO₂ Status: High ({pct:.2f}%)")
+            self.air_status.setStyleSheet("font-size: 16px; font-weight: 700; color: #ffcb6b; padding: 2px 4px;")
+            self.tip_label.setText("CO₂ above 5.2% — check regulator and flow rate.")
 
    
     def _clear_graphs(self) -> None:
@@ -541,7 +941,55 @@ class SensorsTab(QWidget):
             
             
    
+    def _update_ranges_display(self, d: dict, alerts: list[str]) -> None:
+        """Refresh the Target Ranges panel current-value and status columns."""
+        IN  = "color: #88e06b; font-size: 22px;"
+        OUT = "color: #ffcb6b; font-size: 22px;"
+        ERR = "color: #ff5555; font-size: 22px;"
+        NA  = "color: #555e6b; font-size: 22px;"
+
+        temp = d.get("temp")
+        co2  = d.get("co2")
+        rh   = d.get("rh")
+
+        # Temperature
+        if temp is not None:
+            self._rng_temp_current.setText(f"{temp:.2f} °C")
+            if "temp_critical" in alerts:
+                self._rng_temp_status.setStyleSheet(ERR)
+            elif "temp_out_of_range" in alerts:
+                self._rng_temp_status.setStyleSheet(OUT)
+            else:
+                self._rng_temp_status.setStyleSheet(IN)
+        else:
+            self._rng_temp_current.setText("—")
+            self._rng_temp_status.setStyleSheet(NA)
+
+        # CO₂
+        if co2 is not None:
+            self._rng_co2_current.setText(f"{co2:.0f} ppm  ({co2/10000:.2f}%)")
+            if "co2_high" in alerts or "co2_low" in alerts:
+                self._rng_co2_status.setStyleSheet(OUT)
+            else:
+                self._rng_co2_status.setStyleSheet(IN)
+        else:
+            self._rng_co2_current.setText("—")
+            self._rng_co2_status.setStyleSheet(NA)
+
+        # Humidity
+        if rh is not None:
+            self._rng_rh_current.setText(f"{rh:.1f} %")
+            if "rh_low" in alerts:
+                self._rng_rh_status.setStyleSheet(OUT)
+            else:
+                self._rng_rh_status.setStyleSheet(IN)
+        else:
+            self._rng_rh_current.setText("—")
+            self._rng_rh_status.setStyleSheet(NA)
+
     def shutdown(self) -> None:
+        if self.is_recording:
+            self._flush_log(final=True)
         if self.reader is not None:
             try:
                 self.reader.stop()

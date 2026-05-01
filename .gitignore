@@ -7,3 +7,5 @@ venv/
 *.log
 .vscode/
 .idea/
+*.md
+*.md
