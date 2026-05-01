@@ -366,6 +366,7 @@ class GantrySystem:  # basically the manager
                 state=GantryState(steps=self.steps, feed=self.feed),
                 port=self._ports.get("needle"),
                 flip_x=-1.0,
+                flip_y=+1.0,
             ),
             "camera": MotionChannel(
                 name="camera",
